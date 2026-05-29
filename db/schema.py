@@ -141,6 +141,60 @@ def init_db(db_path: str = DB_PATH) -> None:
         conn.close()
 
 
+def save_race_list(races, db_path: str = DB_PATH) -> None:
+    """RaceInfo リストをracesテーブルに保存する（重複は無視）。"""
+    conn = get_connection(db_path)
+    try:
+        with conn:
+            for r in races:
+                conn.execute(
+                    """INSERT OR IGNORE INTO races
+                       (race_id, date, venue, race_number, race_name, course_type, distance, race_class)
+                       VALUES (?,?,?,?,?,?,?,?)""",
+                    (r.race_id, r.date.isoformat(), r.venue, r.race_number,
+                     r.race_name, r.course_type, r.distance, r.race_class),
+                )
+    finally:
+        conn.close()
+
+
+def save_race_detail(detail, db_path: str = DB_PATH) -> None:
+    """RaceDetail をentries・results・racesテーブルに保存する（重複は無視）。"""
+    conn = get_connection(db_path)
+    try:
+        with conn:
+            # 馬場・天気をracesに反映
+            conn.execute(
+                "UPDATE races SET track_condition=?, weather=? WHERE race_id=?",
+                (detail.track_condition, detail.weather, detail.race_id),
+            )
+            for e in detail.entries:
+                conn.execute(
+                    """INSERT OR IGNORE INTO horses (horse_id, name) VALUES (?,?)""",
+                    (e.horse_id, e.horse_name),
+                )
+                conn.execute(
+                    """INSERT OR IGNORE INTO entries
+                       (race_id, horse_id, jockey_name, trainer_name, frame_number,
+                        horse_number, weight_carried, horse_weight, horse_weight_diff,
+                        odds, popularity)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (detail.race_id, e.horse_id, e.jockey_name, e.trainer_name,
+                     e.frame_number, e.horse_number, e.weight_carried,
+                     e.horse_weight, e.horse_weight_diff, e.odds, e.popularity),
+                )
+            for r in detail.results:
+                conn.execute(
+                    """INSERT OR IGNORE INTO results
+                       (race_id, horse_id, finish_position, finish_time, margin)
+                       VALUES (?,?,?,?,?)""",
+                    (detail.race_id, r.horse_id, r.finish_position,
+                     r.finish_time, r.margin),
+                )
+    finally:
+        conn.close()
+
+
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     """
     SQLite接続を返す。
