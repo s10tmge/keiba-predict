@@ -29,9 +29,9 @@ REQUEST_TIMEOUT = 30
 # =========================================================
 # netkeiba URL設定
 # =========================================================
-# レース一覧ページ（日付指定）
-# 例: https://race.netkeiba.com/top/race_list.html?kaisai_date=20240101
-RACE_LIST_URL = "https://race.netkeiba.com/top/race_list.html"
+# レース一覧ページ（日付指定）- db.netkeiba.com は静的HTML
+# 例: https://db.netkeiba.com/race/list/20240101/
+RACE_LIST_BASE_URL = "https://db.netkeiba.com/race/list/"
 
 # レース詳細ページ（race_id指定）
 # 例: https://db.netkeiba.com/race/202401010101/

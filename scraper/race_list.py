@@ -1,7 +1,7 @@
 """
 scraper/race_list.py - 開催日のレース一覧を取得する
 
-対象URL: https://race.netkeiba.com/top/race_list.html?kaisai_date=YYYYMMDD
+対象URL: https://db.netkeiba.com/race/list/YYYYMMDD/
 """
 
 import re
@@ -10,7 +10,7 @@ from datetime import date
 
 from bs4 import BeautifulSoup
 
-from config import EXCLUDE_RACE_KEYWORDS, RACE_LIST_URL
+from config import EXCLUDE_RACE_KEYWORDS, RACE_LIST_BASE_URL
 from scraper.base import BaseScraper
 
 
@@ -30,7 +30,7 @@ class RaceListScraper(BaseScraper):
     def fetch(self, target_date: date) -> list[RaceInfo]:
         """指定日のレース一覧を取得し、除外フィルター適用後のリストを返す。"""
         date_str = target_date.strftime("%Y%m%d")
-        url = f"{RACE_LIST_URL}?kaisai_date={date_str}"
+        url = f"{RACE_LIST_BASE_URL}{date_str}/"
         resp = self.get(url)
         return self._parse(resp.text, target_date)
 
@@ -38,30 +38,35 @@ class RaceListScraper(BaseScraper):
         soup = BeautifulSoup(html, "lxml")
         races: list[RaceInfo] = []
 
-        for race_list in soup.select(".RaceList_DataItem"):
-            link = race_list.select_one("a[href*='/race/']")
-            if not link:
-                continue
-
+        # db.netkeiba.com/race/list/ のリンクパターン: /race/202301060201/
+        for link in soup.find_all("a", href=re.compile(r"/race/\d{12}/")):
             href = link["href"]
-            m = re.search(r"/race/(\d{12})", href)
+            m = re.search(r"/race/(\d{12})/", href)
             if not m:
                 continue
             race_id = m.group(1)
 
-            race_name = (race_list.select_one(".RaceName") or race_list.select_one(".ItemTitle") or link).get_text(strip=True)
+            race_name = link.get_text(strip=True)
+
+            # レース番号はリンクテキストか周辺テキストから取得
+            # race_idの末尾2桁がレース番号
+            race_number = int(race_id[10:12])
+
             if self._should_exclude(race_name):
                 continue
 
-            # 競馬場名（race_idの5〜6桁目から推定）
+            # 競馬場コードはrace_idの5〜6桁目
             venue_code = race_id[4:6]
             venue = self._venue_name(venue_code)
 
-            race_number_text = race_list.select_one(".RaceNum")
-            race_number = int(re.search(r"\d+", race_number_text.get_text()).group()) if race_number_text else 0
+            # コース・距離は周辺のtdから取得を試みる
+            parent_td = link.find_parent("td")
+            course_text = ""
+            if parent_td:
+                row = parent_td.find_parent("tr")
+                if row:
+                    course_text = row.get_text()
 
-            # コース・距離情報
-            course_text = (race_list.select_one(".RaceData01") or race_list.select_one(".Item03") or link).get_text()
             course_type, distance = self._parse_course(course_text)
 
             races.append(RaceInfo(
