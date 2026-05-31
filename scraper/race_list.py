@@ -10,7 +10,7 @@ from datetime import date
 
 from bs4 import BeautifulSoup
 
-from config import EXCLUDE_RACE_KEYWORDS, RACE_LIST_BASE_URL
+from config import EXCLUDE_RACE_KEYWORDS, JRA_VENUE_CODES, RACE_LIST_BASE_URL
 from scraper.base import BaseScraper
 
 
@@ -57,6 +57,8 @@ class RaceListScraper(BaseScraper):
 
             # 競馬場コードはrace_idの5〜6桁目
             venue_code = race_id[4:6]
+            if venue_code not in JRA_VENUE_CODES:
+                continue  # 地方競馬を除外
             venue = self._venue_name(venue_code)
 
             # コース・距離は周辺のtdから取得を試みる
