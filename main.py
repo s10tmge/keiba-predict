@@ -211,7 +211,61 @@ def build_parser() -> argparse.ArgumentParser:
     scrape_parser.add_argument("--year", type=int, metavar="YYYY", help="対象年（--monthと組み合わせて使用）")
     scrape_parser.add_argument("--month", type=int, metavar="M", help="対象月 1〜12（--yearと組み合わせて使用）")
 
+    # predict サブコマンド
+    predict_parser = subparsers.add_parser("predict", help="指定日のレースを予測してスコア上位3レースを表示する")
+    predict_parser.add_argument("--date", metavar="YYYY-MM-DD", required=True, help="予測対象日")
+
     return parser
+
+
+def cmd_predict(args: argparse.Namespace) -> int:
+    """指定日のJRAレースをスコアリングして上位3レースを表示する。"""
+    from db.schema import get_connection
+    from features.calculator import calc_features_for_race
+    from features.scorer import rank_horses
+
+    JRA_VENUES = {"東京", "中山", "阪神", "京都", "中京", "新潟", "福島", "小倉", "札幌", "函館"}
+
+    conn = get_connection()
+    races = conn.execute(
+        "SELECT race_id, venue, race_number, race_name, course_type, distance FROM races WHERE date=?",
+        (args.date,)
+    ).fetchall()
+
+    jra_races = [r for r in races if r[1] in JRA_VENUES]
+    if not jra_races:
+        print(f"{args.date} のJRAレースデータがありません。先にscrapeを実行してください。")
+        return 1
+
+    print(f"\n{args.date} のJRAレース予測（{len(jra_races)}レース対象）\n")
+
+    race_scores = []
+    for race_id, venue, race_number, race_name, course_type, distance in jra_races:
+        features = calc_features_for_race(conn, race_id)
+        if not features:
+            continue
+        ranked = rank_horses(features)
+        # レースの「予測しやすさ」= 1位と2位のスコア差（大きいほど本命明確）
+        top_score = ranked[0][1] if ranked else 0
+        gap = (ranked[0][1] - ranked[1][1]) if len(ranked) >= 2 else 0
+        confidence = top_score + gap * 2
+        race_scores.append((race_id, venue, race_number, race_name, course_type, distance, ranked, confidence))
+
+    race_scores.sort(key=lambda x: x[7], reverse=True)
+
+    print("=" * 60)
+    print("★ 本日の参加推奨レース TOP3")
+    print("=" * 60)
+    for i, (race_id, venue, race_number, race_name, course_type, distance, ranked, confidence) in enumerate(race_scores[:3], 1):
+        print(f"\n【{i}位】{venue} {race_number}R {race_name}")
+        print(f"  コース: {course_type}{distance}m  信頼度スコア: {confidence:.2f}")
+        print("  --- 予測順位 ---")
+        for rank, (feat, score) in enumerate(ranked[:5], 1):
+            odds_str = f"単勝{feat.odds:.1f}倍" if feat.odds else "オッズ不明"
+            print(f"  {rank}位: {feat.horse_number}番馬  スコア:{score:.2f}  {odds_str}")
+
+    conn.close()
+    return 0
 
 
 def main() -> int:
@@ -222,6 +276,8 @@ def main() -> int:
         return cmd_init_db(args)
     elif args.command == "scrape":
         return cmd_scrape(args)
+    elif args.command == "predict":
+        return cmd_predict(args)
     else:
         parser.print_help()
         return 1
