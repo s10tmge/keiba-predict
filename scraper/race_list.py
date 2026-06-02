@@ -32,6 +32,7 @@ class RaceListScraper(BaseScraper):
         date_str = target_date.strftime("%Y%m%d")
         url = f"{RACE_LIST_BASE_URL}{date_str}/"
         resp = self.get(url)
+        resp.encoding = "euc-jp"
         return self._parse(resp.text, target_date)
 
     def _parse(self, html: str, target_date: date) -> list[RaceInfo]:

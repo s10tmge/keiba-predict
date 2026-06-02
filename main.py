@@ -122,10 +122,10 @@ def cmd_scrape(args: argparse.Namespace) -> int:
                     logger.warning(f"レース詳細取得に失敗 ({race_id}): {exc}")
                     continue
 
-                # 馬場・天気を races テーブルへ更新
+                # 馬場・天気・距離・コース種別を races テーブルへ更新
                 conn.execute(
-                    "UPDATE races SET track_condition=?, weather=? WHERE race_id=?",
-                    (detail.track_condition, detail.weather, race_id),
+                    "UPDATE races SET track_condition=?, weather=?, distance=?, course_type=? WHERE race_id=?",
+                    (detail.track_condition, detail.weather, detail.distance, detail.course_type, race_id),
                 )
 
                 # entries & horses & results を保存
