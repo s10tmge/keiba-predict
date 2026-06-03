@@ -220,6 +220,9 @@ def build_parser() -> argparse.ArgumentParser:
     bt_parser.add_argument("--start", metavar="YYYY-MM-DD", default="2023-01-01", help="開始日")
     bt_parser.add_argument("--end", metavar="YYYY-MM-DD", default="2023-12-31", help="終了日")
 
+    # analyze サブコマンド
+    subparsers.add_parser("analyze", help="25種類のパターン分析を実行する")
+
     return parser
 
 
@@ -297,6 +300,13 @@ def main() -> int:
         return cmd_predict(args)
     elif args.command == "backtest":
         return cmd_backtest(args)
+    elif args.command == "analyze":
+        from db.schema import get_connection
+        from analysis.pattern_finder import run_all
+        conn = get_connection()
+        run_all(conn)
+        conn.close()
+        return 0
     else:
         parser.print_help()
         return 1
