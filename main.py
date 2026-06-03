@@ -237,6 +237,9 @@ def build_parser() -> argparse.ArgumentParser:
     # signal-backtest サブコマンド
     subparsers.add_parser("signal-backtest", help="組み合わせシグナルのバックテストを実行する")
 
+    # payout-analysis サブコマンド
+    subparsers.add_parser("payout-analysis", help="実払戻データによるROI分析")
+
     return parser
 
 
@@ -328,6 +331,14 @@ def main() -> int:
         results = run_signal_backtest(conn)
         conn.close()
         print_signal_results(results)
+        return 0
+    elif args.command == "payout-analysis":
+        from db.schema import get_connection
+        from analysis.payout_analysis import run_payout_analysis, print_payout_analysis
+        conn = get_connection()
+        results = run_payout_analysis(conn)
+        conn.close()
+        print_payout_analysis(results)
         return 0
     else:
         parser.print_help()
