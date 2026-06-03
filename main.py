@@ -223,6 +223,9 @@ def build_parser() -> argparse.ArgumentParser:
     # analyze サブコマンド
     subparsers.add_parser("analyze", help="25種類のパターン分析を実行する")
 
+    # signal-backtest サブコマンド
+    subparsers.add_parser("signal-backtest", help="組み合わせシグナルのバックテストを実行する")
+
     return parser
 
 
@@ -306,6 +309,14 @@ def main() -> int:
         conn = get_connection()
         run_all(conn)
         conn.close()
+        return 0
+    elif args.command == "signal-backtest":
+        from db.schema import get_connection
+        from analysis.signal_backtest import run_signal_backtest, print_signal_results
+        conn = get_connection()
+        results = run_signal_backtest(conn)
+        conn.close()
+        print_signal_results(results)
         return 0
     else:
         parser.print_help()
