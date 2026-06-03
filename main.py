@@ -215,7 +215,24 @@ def build_parser() -> argparse.ArgumentParser:
     predict_parser = subparsers.add_parser("predict", help="指定日のレースを予測してスコア上位3レースを表示する")
     predict_parser.add_argument("--date", metavar="YYYY-MM-DD", required=True, help="予測対象日")
 
+    # backtest サブコマンド
+    bt_parser = subparsers.add_parser("backtest", help="過去データでバックテストを実行する")
+    bt_parser.add_argument("--start", metavar="YYYY-MM-DD", default="2023-01-01", help="開始日")
+    bt_parser.add_argument("--end", metavar="YYYY-MM-DD", default="2023-12-31", help="終了日")
+
     return parser
+
+
+def cmd_backtest(args: argparse.Namespace) -> int:
+    from db.schema import get_connection
+    from backtest.runner import run_backtest, print_summary
+
+    print(f"バックテスト実行中: {args.start} 〜 {args.end}")
+    conn = get_connection()
+    results, summary = run_backtest(conn, args.start, args.end)
+    conn.close()
+    print_summary(summary, results)
+    return 0
 
 
 def cmd_predict(args: argparse.Namespace) -> int:
@@ -278,6 +295,8 @@ def main() -> int:
         return cmd_scrape(args)
     elif args.command == "predict":
         return cmd_predict(args)
+    elif args.command == "backtest":
+        return cmd_backtest(args)
     else:
         parser.print_help()
         return 1
