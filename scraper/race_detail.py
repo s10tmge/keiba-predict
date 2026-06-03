@@ -38,6 +38,14 @@ class ResultData:
 
 
 @dataclass
+class PayoutData:
+    bet_type: str
+    combination: str
+    payout: int
+    popularity: int | None
+
+
+@dataclass
 class RaceDetail:
     race_id: str
     track_condition: str
@@ -46,6 +54,7 @@ class RaceDetail:
     course_type: str
     entries: list[EntryData] = field(default_factory=list)
     results: list[ResultData] = field(default_factory=list)
+    payouts: list[PayoutData] = field(default_factory=list)
 
 
 class RaceDetailScraper(BaseScraper):
@@ -190,4 +199,42 @@ class RaceDetailScraper(BaseScraper):
             )
             detail.results.append(result)
 
+        detail.payouts = self._parse_payouts(soup)
         return detail
+
+    def _parse_payouts(self, soup: BeautifulSoup) -> list[PayoutData]:
+        """払戻テーブルを解析する。"""
+        payouts = []
+        for table in soup.select("table.pay_table_01, table.pay_table_02"):
+            for row in table.select("tr"):
+                cells = row.select("td")
+                if len(cells) < 2:
+                    continue
+                bet_type = row.select_one("th")
+                if not bet_type:
+                    continue
+                bet_type_text = bet_type.get_text(strip=True)
+
+                combinations = [s.strip() for s in cells[0].get_text(separator="\n").split("\n") if s.strip()]
+                payouts_raw  = [s.strip().replace(",", "") for s in cells[1].get_text(separator="\n").split("\n") if s.strip()]
+                pops_raw     = [s.strip() for s in cells[2].get_text(separator="\n").split("\n") if s.strip()] if len(cells) > 2 else []
+
+                for i, combo in enumerate(combinations):
+                    payout_str = payouts_raw[i] if i < len(payouts_raw) else ""
+                    pop_str    = pops_raw[i] if i < len(pops_raw) else ""
+                    try:
+                        payout_val = int(re.sub(r"[^\d]", "", payout_str))
+                    except (ValueError, TypeError):
+                        continue
+                    try:
+                        pop_val = int(re.sub(r"[^\d]", "", pop_str)) if pop_str else None
+                    except (ValueError, TypeError):
+                        pop_val = None
+                    combo = re.sub(r"[　\s]", "", combo)
+                    payouts.append(PayoutData(
+                        bet_type=bet_type_text,
+                        combination=combo,
+                        payout=payout_val,
+                        popularity=pop_val,
+                    ))
+        return payouts

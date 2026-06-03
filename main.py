@@ -175,6 +175,17 @@ def cmd_scrape(args: argparse.Namespace) -> int:
                         ),
                     )
 
+                for payout in detail.payouts:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO payouts
+                          (race_id, bet_type, combination, payout, popularity)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (race_id, payout.bet_type, payout.combination,
+                         payout.payout, payout.popularity),
+                    )
+
                 conn.commit()
                 total_races += 1
                 logger.info(f"保存完了: {race_id}")

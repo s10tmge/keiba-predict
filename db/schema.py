@@ -80,6 +80,18 @@ CREATE TABLE IF NOT EXISTS results (
 )
 """
 
+SQL_CREATE_PAYOUTS = """
+CREATE TABLE IF NOT EXISTS payouts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    race_id       TEXT    NOT NULL,
+    bet_type      TEXT    NOT NULL,   -- 単勝/複勝/枠連/馬連/ワイド/馬単/三連複/三連単
+    combination   TEXT    NOT NULL,   -- 馬番の組み合わせ (例: "3", "3-5", "1-3-7")
+    payout        INTEGER NOT NULL,   -- 払戻金額 (100円あたり)
+    popularity    INTEGER,            -- 人気順位
+    UNIQUE (race_id, bet_type, combination)
+)
+"""
+
 SQL_CREATE_PREDICTIONS = """
 CREATE TABLE IF NOT EXISTS predictions (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,6 +120,7 @@ ALL_CREATE_STATEMENTS = [
     SQL_CREATE_HORSES,
     SQL_CREATE_ENTRIES,
     SQL_CREATE_RESULTS,
+    SQL_CREATE_PAYOUTS,
     SQL_CREATE_PREDICTIONS,
     *SQL_CREATE_INDEXES,
 ]
