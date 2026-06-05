@@ -256,7 +256,7 @@ def cmd_backtest(args: argparse.Namespace) -> int:
 
 
 def cmd_predict(args: argparse.Namespace) -> int:
-    """指定日のJRAレースをスコアリングして上位3レースを表示する。"""
+    """指定日のJRAレースをスコアリングして買い目を推薦する。"""
     from db.schema import get_connection
     from features.calculator import calc_features_for_race
     from features.scorer import rank_horses
@@ -282,24 +282,68 @@ def cmd_predict(args: argparse.Namespace) -> int:
         if not features:
             continue
         ranked = rank_horses(features)
-        # レースの「予測しやすさ」= 1位と2位のスコア差（大きいほど本命明確）
+
+        # 出走頭数
+        headcount = len(features)
+
+        # 断然人気チェック（1番人気オッズ≤1.5は除外）
+        pop1_odds = next((f.odds for f, _ in ranked if f.popularity == 1), None)
+        if pop1_odds and pop1_odds <= 1.5:
+            continue
+
+        # 多頭数除外（16頭以上）
+        if headcount >= 16:
+            continue
+
         top_score = ranked[0][1] if ranked else 0
         gap = (ranked[0][1] - ranked[1][1]) if len(ranked) >= 2 else 0
         confidence = top_score + gap * 2
-        race_scores.append((race_id, venue, race_number, race_name, course_type, distance, ranked, confidence))
+
+        # シグナル判定
+        signals = []
+        for feat, score in ranked[:5]:
+            pop = feat.popularity or 99
+            if 4 <= pop <= 9 and headcount <= 12:
+                signals.append(f"{feat.horse_number}番({pop}人気)が中穴×少頭数シグナル")
+            if 4 <= pop <= 6 and "芝" in (features[0].course_type if hasattr(features[0], 'course_type') else ""):
+                pass  # course_typeはfeaturesに含まれないため省略
+
+        race_scores.append((race_id, venue, race_number, race_name, course_type,
+                            distance, ranked, confidence, headcount, signals))
 
     race_scores.sort(key=lambda x: x[7], reverse=True)
 
-    print("=" * 60)
-    print("★ 本日の参加推奨レース TOP3")
-    print("=" * 60)
-    for i, (race_id, venue, race_number, race_name, course_type, distance, ranked, confidence) in enumerate(race_scores[:3], 1):
+    print("=" * 65)
+    print("★ 本日の参加推奨レース TOP5")
+    print("  (断然人気1.5倍以下・16頭以上 は除外済み)")
+    print("=" * 65)
+
+    for i, (race_id, venue, race_number, race_name, course_type, distance,
+            ranked, confidence, headcount, signals) in enumerate(race_scores[:5], 1):
         print(f"\n【{i}位】{venue} {race_number}R {race_name}")
-        print(f"  コース: {course_type}{distance}m  信頼度スコア: {confidence:.2f}")
+        print(f"  {course_type}{distance}m  {headcount}頭  信頼度: {confidence:.1f}")
         print("  --- 予測順位 ---")
         for rank, (feat, score) in enumerate(ranked[:5], 1):
-            odds_str = f"単勝{feat.odds:.1f}倍" if feat.odds else "オッズ不明"
-            print(f"  {rank}位: {feat.horse_number}番馬  スコア:{score:.2f}  {odds_str}")
+            odds_str = f"{feat.odds:.1f}倍" if feat.odds else "不明"
+            pop_str  = f"{feat.popularity}人気" if feat.popularity else ""
+            signal_mark = " ◆中穴" if feat.popularity and 4 <= feat.popularity <= 9 and headcount <= 12 else ""
+            print(f"  {rank}位: {feat.horse_number}番  {pop_str}  単勝{odds_str}  スコア:{score:.1f}{signal_mark}")
+
+        # 買い目推薦
+        top2 = [feat for feat, _ in ranked[:2]]
+        signal_horses = [feat for feat, _ in ranked[:5]
+                         if feat.popularity and 4 <= feat.popularity <= 9 and headcount <= 12]
+        print("  --- 買い目推薦 ---")
+        if signal_horses:
+            for sh in signal_horses[:2]:
+                print(f"  複勝: {sh.horse_number}番  ({sh.popularity}人気 {sh.odds:.1f}倍)")
+            if len(top2) == 2:
+                print(f"  馬連: {top2[0].horse_number}-{top2[1].horse_number}番")
+        else:
+            if top2:
+                print(f"  複勝: {top2[0].horse_number}番")
+            if len(top2) == 2:
+                print(f"  馬連: {top2[0].horse_number}-{top2[1].horse_number}番")
 
     conn.close()
     return 0
