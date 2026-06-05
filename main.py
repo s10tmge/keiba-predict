@@ -34,35 +34,26 @@ def cmd_init_db(args: argparse.Namespace) -> int:
 
 
 def cmd_scrape(args: argparse.Namespace) -> int:
-    """
-    レースデータをスクレイピングしてDBに保存する。
-
-    --date を指定した場合: その日付1日分
-    --year と --month を指定した場合: その月の全開催日分
-    """
+    """レースデータをスクレイピングしてDBに保存する。新馬・障害は除外。"""
     import sqlite3
     from db.schema import get_connection, init_db
     from scraper.race_list import RaceListScraper
     from scraper.race_detail import RaceDetailScraper
 
-    # DBが未初期化でも動くよう初期化を試みる
     init_db()
 
     list_scraper = RaceListScraper()
     detail_scraper = RaceDetailScraper()
 
-    # 対象日付リストを決定
     target_dates: list[date] = []
 
     if args.date:
         try:
             target_dates = [date.fromisoformat(args.date)]
         except ValueError:
-            print(f"エラー: 日付の形式が不正です（YYYY-MM-DD）: {args.date}", file=sys.stderr)
+            print(f"エラー: 日付の形式が不正です: {args.date}", file=sys.stderr)
             return 1
     elif args.year and args.month:
-        # 月単位: race_list スクレイパーの fetch_month は内部で日付走査する
-        # ここでは1日ずつ取得するため日付リストを生成
         from datetime import timedelta
         year, month = args.year, args.month
         start = date(year, month, 1)
@@ -71,8 +62,16 @@ def cmd_scrape(args: argparse.Namespace) -> int:
         while current <= end:
             target_dates.append(current)
             current += timedelta(days=1)
+    elif args.year:
+        from datetime import timedelta
+        start = date(args.year, 1, 1)
+        end = date(args.year, 12, 31)
+        current = start
+        while current <= end:
+            target_dates.append(current)
+            current += timedelta(days=1)
     else:
-        print("エラー: --date または --year と --month を指定してください。", file=sys.stderr)
+        print("エラー: --date / --year / --year --month を指定してください。", file=sys.stderr)
         return 1
 
     conn = get_connection()
@@ -91,97 +90,63 @@ def cmd_scrape(args: argparse.Namespace) -> int:
                 race_id = race_info.race_id
                 logger.info(f"レース詳細取得中: {race_id} ({race_info.venue} {race_info.race_number}R)")
 
-                # races テーブルへ保存
                 try:
                     conn.execute(
-                        """
-                        INSERT OR IGNORE INTO races
+                        """INSERT OR IGNORE INTO races
                           (race_id, date, venue, race_number, race_name, course_type, distance, race_class)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            race_id,
-                            race_info.date.strftime("%Y-%m-%d"),
-                            race_info.venue,
-                            race_info.race_number,
-                            race_info.race_name,
-                            race_info.course_type,
-                            race_info.distance,
-                            race_info.race_class,
-                        ),
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (race_id, race_info.date.strftime("%Y-%m-%d"), race_info.venue,
+                         race_info.race_number, race_info.race_name, race_info.course_type,
+                         race_info.distance, race_info.race_class),
                     )
                     conn.commit()
                 except sqlite3.Error as exc:
                     logger.error(f"races INSERT失敗 ({race_id}): {exc}")
                     continue
 
-                # レース詳細を取得
                 try:
                     detail = detail_scraper.fetch(race_id)
                 except Exception as exc:
                     logger.warning(f"レース詳細取得に失敗 ({race_id}): {exc}")
                     continue
 
-                # 馬場・天気・距離・コース種別を races テーブルへ更新
                 conn.execute(
-                    "UPDATE races SET track_condition=?, weather=?, distance=?, course_type=? WHERE race_id=?",
-                    (detail.track_condition, detail.weather, detail.distance, detail.course_type, race_id),
+                    "UPDATE races SET track_condition=?, weather=?, distance=?, course_type=?, race_class=? WHERE race_id=?",
+                    (detail.track_condition, detail.weather, detail.distance,
+                     detail.course_type, detail.race_class, race_id),
                 )
 
-                # entries & horses & results を保存
                 for entry in detail.entries:
-                    # horses テーブル（存在しなければ INSERT）
                     conn.execute(
                         "INSERT OR IGNORE INTO horses (horse_id, name) VALUES (?, ?)",
                         (entry.horse_id, entry.horse_name),
                     )
-                    # entries テーブル
                     conn.execute(
-                        """
-                        INSERT OR IGNORE INTO entries
+                        """INSERT OR IGNORE INTO entries
                           (race_id, horse_id, jockey_name, trainer_name,
                            frame_number, horse_number, weight_carried,
-                           horse_weight, horse_weight_diff, odds, popularity)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            race_id,
-                            entry.horse_id,
-                            entry.jockey_name,
-                            entry.trainer_name,
-                            entry.frame_number,
-                            entry.horse_number,
-                            entry.weight_carried,
-                            entry.horse_weight,
-                            entry.horse_weight_diff,
-                            entry.odds,
-                            entry.popularity,
-                        ),
+                           horse_weight, horse_weight_diff, odds, popularity, last_3f)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (race_id, entry.horse_id, entry.jockey_name, entry.trainer_name,
+                         entry.frame_number, entry.horse_number, entry.weight_carried,
+                         entry.horse_weight, entry.horse_weight_diff,
+                         entry.odds, entry.popularity, entry.last_3f),
                     )
 
                 for result in detail.results:
                     conn.execute(
-                        """
-                        INSERT OR IGNORE INTO results
+                        """INSERT OR IGNORE INTO results
                           (race_id, horse_id, finish_position, finish_time, margin)
-                        VALUES (?, ?, ?, ?, ?)
-                        """,
-                        (
-                            race_id,
-                            result.horse_id,
-                            result.finish_position,
-                            result.finish_time,
-                            result.margin,
-                        ),
+                          VALUES (?, ?, ?, ?, ?)""",
+                        (race_id, result.horse_id, result.finish_position,
+                         result.finish_time, result.margin),
                     )
 
                 for payout in detail.payouts:
                     conn.execute(
-                        """
-                        INSERT OR IGNORE INTO payouts
+                        """INSERT OR IGNORE INTO payouts
                           (race_id, bet_type, combination, payout, popularity)
-                        VALUES (?, ?, ?, ?, ?)
-                        """,
+                          VALUES (?, ?, ?, ?, ?)""",
                         (race_id, payout.bet_type, payout.combination,
                          payout.payout, payout.popularity),
                     )
@@ -219,7 +184,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="YYYY-MM-DD",
         help="スクレイピング対象日 (例: 2024-01-01)",
     )
-    scrape_parser.add_argument("--year", type=int, metavar="YYYY", help="対象年（--monthと組み合わせて使用）")
+    scrape_parser.add_argument("--year", type=int, metavar="YYYY", help="対象年（単独で1年分、--monthと組み合わせで1ヶ月分）")
     scrape_parser.add_argument("--month", type=int, metavar="M", help="対象月 1〜12（--yearと組み合わせて使用）")
 
     # predict サブコマンド
@@ -240,7 +205,61 @@ def build_parser() -> argparse.ArgumentParser:
     # payout-analysis サブコマンド
     subparsers.add_parser("payout-analysis", help="実払戻データによるROI分析")
 
+    # scrape-horses サブコマンド
+    subparsers.add_parser("scrape-horses", help="DBにある全馬の過去成績を取得してhorse_historiesに保存")
+
     return parser
+
+
+def cmd_scrape_horses() -> int:
+    """DBにある全馬の過去成績をスクレイピングしてhorse_historiesに保存する。"""
+    import sqlite3
+    from db.schema import get_connection, init_db
+    from scraper.horse_history import HorseHistoryScraper
+
+    init_db()
+    conn = get_connection()
+    scraper = HorseHistoryScraper()
+
+    # 既にhorse_historiesにある馬はスキップ
+    done = set(r[0] for r in conn.execute("SELECT DISTINCT horse_id FROM horse_histories").fetchall())
+    all_horses = [r[0] for r in conn.execute("SELECT horse_id FROM horses").fetchall()]
+    targets = [h for h in all_horses if h not in done]
+
+    print(f"対象馬: {len(targets)}頭 (取得済み: {len(done)}頭)")
+    saved = 0
+
+    try:
+        for i, horse_id in enumerate(targets, 1):
+            if i % 100 == 0:
+                logger.info(f"進捗: {i}/{len(targets)} ({saved}件保存済み)")
+            records = scraper.fetch(horse_id)
+            for rec in records:
+                try:
+                    conn.execute(
+                        """INSERT OR IGNORE INTO horse_histories
+                          (horse_id, race_date, venue, race_name, race_class,
+                           course_type, distance, track_condition, headcount,
+                           frame_number, horse_number, popularity, odds,
+                           finish_position, finish_time, last_3f,
+                           horse_weight, horse_weight_diff, jockey_name)
+                          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (rec.horse_id, rec.race_date, rec.venue, rec.race_name,
+                         rec.race_class, rec.course_type, rec.distance,
+                         rec.track_condition, rec.headcount, rec.frame_number,
+                         rec.horse_number, rec.popularity, rec.odds,
+                         rec.finish_position, rec.finish_time, rec.last_3f,
+                         rec.horse_weight, rec.horse_weight_diff, rec.jockey_name),
+                    )
+                    saved += 1
+                except sqlite3.Error:
+                    pass
+            conn.commit()
+    finally:
+        conn.close()
+
+    print(f"馬過去成績の取得完了。保存件数: {saved}")
+    return 0
 
 
 def cmd_backtest(args: argparse.Namespace) -> int:
@@ -384,6 +403,8 @@ def main() -> int:
         conn.close()
         print_payout_analysis(results)
         return 0
+    elif args.command == "scrape-horses":
+        return cmd_scrape_horses()
     else:
         parser.print_help()
         return 1

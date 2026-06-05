@@ -51,17 +51,18 @@ CREATE TABLE IF NOT EXISTS horses (
 SQL_CREATE_ENTRIES = """
 CREATE TABLE IF NOT EXISTS entries (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    race_id           TEXT    NOT NULL,   -- races.race_id への参照
-    horse_id          TEXT    NOT NULL,   -- horses.horse_id への参照
-    jockey_name       TEXT,               -- 騎手名
-    trainer_name      TEXT,               -- 調教師名
-    frame_number      INTEGER,            -- 枠番 (1〜8)
-    horse_number      INTEGER,            -- 馬番
-    weight_carried    REAL,               -- 斤量 (kg)
-    horse_weight      INTEGER,            -- 馬体重 (kg)
-    horse_weight_diff INTEGER,            -- 馬体重増減 (kg)
-    odds              REAL,               -- 単勝オッズ
-    popularity        INTEGER,            -- 人気順位
+    race_id           TEXT    NOT NULL,
+    horse_id          TEXT    NOT NULL,
+    jockey_name       TEXT,
+    trainer_name      TEXT,
+    frame_number      INTEGER,
+    horse_number      INTEGER,
+    weight_carried    REAL,
+    horse_weight      INTEGER,
+    horse_weight_diff INTEGER,
+    odds              REAL,
+    popularity        INTEGER,
+    last_3f           REAL,               -- 上がり3ハロン (秒)
     created_at        TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
     UNIQUE (race_id, horse_number)
 )
@@ -77,6 +78,32 @@ CREATE TABLE IF NOT EXISTS results (
     margin          TEXT,               -- 着差 (例: "クビ", "1/2", "1")
     created_at      TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')),
     UNIQUE (race_id, horse_id)
+)
+"""
+
+SQL_CREATE_HORSE_HISTORIES = """
+CREATE TABLE IF NOT EXISTS horse_histories (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    horse_id        TEXT    NOT NULL,
+    race_date       TEXT    NOT NULL,     -- YYYY-MM-DD
+    venue           TEXT,
+    race_name       TEXT,
+    race_class      TEXT,                 -- G1/G2/G3/OP/3勝/2勝/1勝/未勝利
+    course_type     TEXT,                 -- 芝/ダート
+    distance        INTEGER,
+    track_condition TEXT,                 -- 良/稍重/重/不良
+    headcount       INTEGER,              -- 出走頭数
+    frame_number    INTEGER,
+    horse_number    INTEGER,
+    popularity      INTEGER,
+    odds            REAL,
+    finish_position INTEGER,
+    finish_time     TEXT,
+    last_3f         REAL,                 -- 上がり3ハロン
+    horse_weight    INTEGER,
+    horse_weight_diff INTEGER,
+    jockey_name     TEXT,
+    UNIQUE (horse_id, race_date, race_name)
 )
 """
 
@@ -120,9 +147,12 @@ ALL_CREATE_STATEMENTS = [
     SQL_CREATE_HORSES,
     SQL_CREATE_ENTRIES,
     SQL_CREATE_RESULTS,
+    SQL_CREATE_HORSE_HISTORIES,
     SQL_CREATE_PAYOUTS,
     SQL_CREATE_PREDICTIONS,
     *SQL_CREATE_INDEXES,
+    "CREATE INDEX IF NOT EXISTS idx_horse_hist_horse ON horse_histories(horse_id)",
+    "CREATE INDEX IF NOT EXISTS idx_horse_hist_date  ON horse_histories(race_date)",
 ]
 
 
