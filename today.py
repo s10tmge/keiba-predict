@@ -107,7 +107,52 @@ def fetch_horse_histories_for_race(race_id: str, conn: sqlite3.Connection) -> No
     write_conn.close()
 
 
-def get_race_entries_with_prev(conn: sqlite3.Connection, race_id: str) -> list[dict]:
+def load_jockey_stats(db_path: str) -> dict:
+    """DBから騎手×コース勝率辞書を作成する。"""
+    import csv as _csv
+    from pathlib import Path
+    # jockey_stats.csvがあれば使う（エクスポート済みの場合）
+    csv_path = Path(db_path).parent / 'jockey_stats.csv'
+    if csv_path.exists():
+        stats = {}
+        with open(csv_path, encoding='utf-8-sig') as f:
+            for r in _csv.DictReader(f):
+                try:
+                    total = int(r['total'])
+                    wins = int(r['wins'])
+                    if total >= 20:
+                        stats[(r['jockey_name'], r['course_type'])] = wins / total
+                except (KeyError, ValueError, ZeroDivisionError):
+                    pass
+        return stats
+    # なければDBから直接集計
+    conn2 = sqlite3.connect(db_path)
+    rows = conn2.execute("""
+        SELECT e.jockey_name, ra.course_type,
+               COUNT(*) AS total,
+               SUM(CASE WHEN r.finish_position=1 THEN 1 ELSE 0 END) AS wins
+        FROM entries e
+        JOIN races ra ON ra.race_id=e.race_id
+        JOIN results r ON r.race_id=e.race_id AND r.horse_id=e.horse_id
+        WHERE ra.date>='2024-01-01' AND e.jockey_name IS NOT NULL
+        GROUP BY e.jockey_name, ra.course_type
+        HAVING COUNT(*) >= 20
+    """).fetchall()
+    conn2.close()
+    return {(r[0], r[1]): r[3]/r[2] for r in rows if r[2] > 0}
+
+
+def get_race_avg_3f(conn: sqlite3.Connection, race_id: str) -> float | None:
+    """レース内の上がり3F平均を返す。"""
+    row = conn.execute(
+        "SELECT AVG(last_3f) FROM entries WHERE race_id=? AND last_3f IS NOT NULL",
+        (race_id,)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def get_race_entries_with_prev(conn: sqlite3.Connection, race_id: str,
+                                jockey_stats: dict = None) -> list[dict]:
     rows = conn.execute("""
         SELECT
             e.horse_id, e.horse_number, e.frame_number,
@@ -124,20 +169,35 @@ def get_race_entries_with_prev(conn: sqlite3.Connection, race_id: str) -> list[d
         ORDER BY e.horse_number
     """, (race_id,)).fetchall()
 
+    race_avg_3f = get_race_avg_3f(conn, race_id)
+
     results = []
     for row in rows:
         e = dict(row)
-        prev = conn.execute("""
+        prev_row = conn.execute("""
             SELECT finish_position, headcount, distance, course_type,
-                   popularity, last_3f, race_class, race_date
+                   popularity, last_3f AS prev_last3f, race_class, race_date
             FROM horse_histories
             WHERE horse_id = ? AND race_date < ?
             ORDER BY race_date DESC LIMIT 1
         """, (e['horse_id'], e['date'])).fetchone()
-        e['prev'] = dict(prev) if prev else None
-        score, signals = score_horse(e, e['prev'])
+        prev = dict(prev_row) if prev_row else None
+
+        # 2走前
+        prev2_row = conn.execute("""
+            SELECT finish_position AS prev2_pos, popularity AS prev2_pop
+            FROM horse_histories
+            WHERE horse_id = ? AND race_date < ?
+            ORDER BY race_date DESC LIMIT 1 OFFSET 1
+        """, (e['horse_id'], e['date'])).fetchone()
+        if prev2_row and prev:
+            prev['prev2_pos'] = prev2_row['prev2_pos']
+
+        score, signals = score_horse(e, prev, race_avg_3f, jockey_stats)
+        e['prev'] = prev
         e['score'] = score
         e['signals'] = signals
+        e['race_avg_3f'] = race_avg_3f
         results.append(e)
 
     results.sort(key=lambda x: x['score'], reverse=True)
@@ -158,26 +218,25 @@ def print_prediction(race_id: str, horses: list[dict]) -> None:
     print(f"{'='*60}")
     print(f"  {'馬番':>3} {'馬名':<12} {'人気':>4} {'オッズ':>7} {'スコア':>5}  前走")
 
+    from analysis.signal_rules import verdict
     for h in signal_horses[:6]:
         pop_str = f"{h['popularity']}人気" if h['popularity'] else "?"
         odds_str = f"{h['odds']:.1f}倍" if h['odds'] else "?"
         prev = h.get('prev')
         prev_str = f"前走{prev['finish_position']}着" if prev and prev.get('finish_position') else "-"
         name = (h['horse_name'] or h['horse_id'])[:12]
-        print(f"  [{h['horse_number']:2}] {name:<12} {pop_str:>5} {odds_str:>7} {h['score']:>5.1f}  {prev_str}")
+        verd = verdict(h['score'])
+        print(f"  [{h['horse_number']:2}] {name:<12} {pop_str:>5} {odds_str:>7} {h['score']:>5.1f}  {prev_str}  {verd}")
         for s in h['signals']:
             print(f"       ✓ {s['name']}: {s['desc']}")
 
-    # 買い目
-    top = signal_horses[:3]
-    if top:
-        nums = [str(h['horse_number']) for h in top]
-        print(f"\n  ◆ 推奨")
-        print(f"    複勝: {nums[0]}番")
-        if len(nums) >= 2:
-            print(f"    馬連: {nums[0]}-{nums[1]}")
-        if len(nums) >= 3:
-            print(f"    3連複: {'-'.join(nums[:3])}")
+    # 買い目（スコアベース）
+    buy = [h for h in signal_horses if h['score'] >= 5.0]
+    if buy:
+        print(f"\n  ◆ 推奨買い目")
+        for h in buy[:3]:
+            verd = verdict(h['score'])
+            print(f"    {verd}  {h['horse_number']}番 {h['horse_name'] or ''} {h['odds']:.1f}倍")
 
 
 def main():
@@ -211,11 +270,13 @@ def main():
 
     print(f"\n=== {args.date} の予測 ({len(races)}レース) ===")
 
+    jockey_stats = load_jockey_stats(args.db)
+
     found = 0
     for race in races:
         if args.fetch:
             fetch_horse_histories_for_race(race['race_id'], conn)
-        horses = get_race_entries_with_prev(conn, race['race_id'])
+        horses = get_race_entries_with_prev(conn, race['race_id'], jockey_stats=jockey_stats)
         signal_count = sum(1 for h in horses if h['score'] > 0)
         if signal_count > 0:
             found += 1
