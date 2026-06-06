@@ -25,20 +25,6 @@ def run(db_path: str = DB_PATH):
 
     # 全エントリ + 前走 + 実払戻 を一括取得
     query = """
-    WITH prev AS (
-        SELECT
-            horse_id,
-            race_date,
-            finish_position AS prev_pos,
-            headcount AS prev_hc,
-            distance AS prev_dist,
-            course_type AS prev_course,
-            popularity AS prev_pop,
-            last_3f AS prev_3f,
-            race_class AS prev_class,
-            ROW_NUMBER() OVER (PARTITION BY horse_id ORDER BY race_date DESC) AS rn
-        FROM horse_histories
-    )
     SELECT
         e.race_id,
         e.horse_id,
@@ -56,20 +42,24 @@ def run(db_path: str = DB_PATH):
         ra.venue,
         r.finish_position,
         (SELECT COUNT(*) FROM entries e2 WHERE e2.race_id = e.race_id) AS headcount,
-        p.prev_pos,
-        p.prev_hc,
-        p.prev_dist,
-        p.prev_course,
-        p.prev_pop,
-        p.prev_3f,
-        p.prev_class,
+        p.finish_position AS prev_pos,
+        p.headcount       AS prev_hc,
+        p.distance        AS prev_dist,
+        p.course_type     AS prev_course,
+        p.popularity      AS prev_pop,
+        p.last_3f         AS prev_3f,
+        p.race_class      AS prev_class,
         pay_f.payout AS fukusho_payout,
         pay_t.payout AS tansho_payout
     FROM entries e
     JOIN races ra ON ra.race_id = e.race_id
     JOIN results r ON r.race_id = e.race_id AND r.horse_id = e.horse_id
-    LEFT JOIN prev p ON p.horse_id = e.horse_id
-        AND p.race_date < ra.date AND p.rn = 1
+    LEFT JOIN horse_histories p
+        ON p.horse_id = e.horse_id
+        AND p.race_date = (
+            SELECT MAX(race_date) FROM horse_histories
+            WHERE horse_id = e.horse_id AND race_date < ra.date
+        )
     LEFT JOIN payouts pay_f ON pay_f.race_id = e.race_id
         AND pay_f.bet_type = '複勝'
         AND pay_f.combination = CAST(e.horse_number AS TEXT)
@@ -77,7 +67,7 @@ def run(db_path: str = DB_PATH):
         AND pay_t.bet_type = '単勝'
         AND pay_t.combination = CAST(e.horse_number AS TEXT)
     WHERE ra.date >= '2025-01-01'
-      AND p.prev_pos IS NOT NULL
+      AND p.finish_position IS NOT NULL
     """
 
     rows = conn.execute(query).fetchall()
