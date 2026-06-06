@@ -214,6 +214,12 @@ def build_parser() -> argparse.ArgumentParser:
     # maegashira サブコマンド
     subparsers.add_parser("maegashira", help="高倍率3着以内馬の前走パターン分析")
 
+    # signal-backtest-v2 サブコマンド
+    subparsers.add_parser("signal-backtest-v2", help="signal_rules.pyの実データ検証（シグナル別・閾値別ROI）")
+
+    # tune-signals サブコマンド
+    subparsers.add_parser("tune-signals", help="実データROIを元にシグナルスコアを自動チューニング")
+
     return parser
 
 
@@ -417,6 +423,14 @@ def main() -> int:
         return 0
     elif args.command == "maegashira":
         from analysis.maegashira_analysis import run
+        run()
+        return 0
+    elif args.command == "signal-backtest-v2":
+        from analysis.signal_backtest_v2 import run
+        run()
+        return 0
+    elif args.command == "tune-signals":
+        from analysis.tune_signals import run
         run()
         return 0
     else:
