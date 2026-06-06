@@ -208,6 +208,12 @@ def build_parser() -> argparse.ArgumentParser:
     # scrape-horses サブコマンド
     subparsers.add_parser("scrape-horses", help="DBにある全馬の過去成績を取得してhorse_historiesに保存")
 
+    # signal-v2 サブコマンド
+    subparsers.add_parser("signal-v2", help="前走データ込み複合シグナル分析（実払戻ROI）")
+
+    # maegashira サブコマンド
+    subparsers.add_parser("maegashira", help="高倍率3着以内馬の前走パターン分析")
+
     return parser
 
 
@@ -405,6 +411,14 @@ def main() -> int:
         return 0
     elif args.command == "scrape-horses":
         return cmd_scrape_horses()
+    elif args.command == "signal-v2":
+        from analysis.signal_v2 import run
+        run()
+        return 0
+    elif args.command == "maegashira":
+        from analysis.maegashira_analysis import run
+        run()
+        return 0
     else:
         parser.print_help()
         return 1
