@@ -1,23 +1,18 @@
 """
-analysis/signal_rules.py - シグナルルール定義
+analysis/signal_rules.py - シグナルルール定義（v2: 実データROI検証済み）
 
-signal_v2.pyの分析結果を元に、有効なシグナルを定義する。
-各ルールは (名前, フィルタ関数, 複勝ROI推定, 説明) のタプル。
+2025年JRAデータ40484件のバックテストに基づく。
+「市場の誤解（ミスプライス）」を突くシグナル設計。
 
-使い方:
-    from analysis.signal_rules import evaluate_signals
-    signals = evaluate_signals(entry_dict, prev_dict)
+有効シグナルの根拠:
+- N1: 前走1-3人気×今回9-11人気 → 単勝ROI 124円（711件）
+- N2: 前走4-6人気×今回9-11人気 → 単勝ROI 101円（1582件）
+- N3: 前走4-6着×同コース      → 複勝ROI 73円（改善余地あり）
+- N4: 馬体重減少-6以上         → 単勝ROI 92円
+- N5: 前走7-10人気×今回6-8人気 → 単勝ROI 88円
 """
 
 from typing import Optional
-
-
-def _class_rank(cls: str) -> int:
-    order = ["未勝利", "1勝", "2勝", "3勝", "オープン", "リステッド", "G3", "G2", "G1"]
-    try:
-        return order.index(cls)
-    except ValueError:
-        return -1
 
 
 def evaluate_signals(entry: dict, prev: Optional[dict]) -> list[dict]:
@@ -26,30 +21,29 @@ def evaluate_signals(entry: dict, prev: Optional[dict]) -> list[dict]:
 
     Args:
         entry: {
-            'popularity': int,
+            'popularity': int,       # 今回人気
             'odds': float,
-            'horse_weight': int,
             'horse_weight_diff': int,
-            'last_3f': float,
-            'course_type': str,         # 芝/ダート
+            'course_type': str,      # 芝/ダート
             'distance': int,
             'headcount': int,
             'race_class': str,
-            'track_condition': str,
         }
         prev: {
-            'finish_position': int,
-            'headcount': int,
-            'distance': int,
-            'course_type': str,
-            'popularity': int,
-            'last_3f': float,
+            'finish_position': int,  # 前走着順
+            'headcount': int,        # 前走頭数
+            'distance': int,         # 前走距離
+            'course_type': str,      # 前走コース
+            'popularity': int,       # 前走人気
             'race_class': str,
         } or None
 
     Returns:
         [{'name': str, 'score': float, 'desc': str}, ...]
     """
+    if not prev:
+        return []
+
     matched = []
 
     pop = entry.get('popularity') or 0
@@ -57,85 +51,85 @@ def evaluate_signals(entry: dict, prev: Optional[dict]) -> list[dict]:
     distance = entry.get('distance') or 0
     headcount = entry.get('headcount') or 0
     weight_diff = entry.get('horse_weight_diff')
-    race_class = entry.get('race_class', '')
-    odds = entry.get('odds') or 0
 
-    if not prev:
-        return matched
+    prev_pos = prev.get('finish_position') or prev.get('prev_pos')
+    prev_hc = prev.get('headcount') or prev.get('prev_hc') or 0
+    prev_dist = prev.get('distance') or prev.get('prev_dist') or 0
+    prev_course = prev.get('course_type') or prev.get('prev_course') or ''
+    prev_pop = prev.get('popularity') or prev.get('prev_pop') or 0
 
-    prev_pos = prev.get('finish_position')
-    prev_hc = prev.get('headcount') or 0
-    prev_dist = prev.get('distance') or 0
-    prev_course = prev.get('course_type', '')
-    prev_pop = prev.get('popularity') or 0
-    prev_class = prev.get('race_class', '')
-
-    # ---- シグナル定義 (score = ROI推定ポイント、高いほど有望) ----
-
-    # S1: 前走1-3着×同コース×6人気以上（過小評価された実力馬）
-    if pop >= 6 and prev_pos and prev_pos <= 3 and prev_course == course:
+    # ============================================================
+    # N1: 前走1-3人気×今回9-11人気（最強: 単勝ROI 124円）
+    # 前走は市場が高評価→今回は市場が過小評価 = 典型的ミスプライス
+    # ============================================================
+    if 9 <= pop <= 11 and 1 <= prev_pop <= 3:
         matched.append({
-            'name': 'S1_前走好走同コース',
-            'score': 1.5,
-            'desc': f"前走{prev_pos}着({prev_course})→今回同コース、今回{pop}人気"
+            'name': 'N1_前走人気急落',
+            'score': 3.0,
+            'desc': f"前走{prev_pop}人気→今回{pop}人気（市場の過小評価）"
         })
 
-    # S2: 前走大頭数(16頭以上)→今回少頭数(12頭以下) × 6人気以上（環境改善）
-    if pop >= 6 and prev_hc >= 16 and 0 < headcount <= 12:
+    # ============================================================
+    # N2: 前走4-6人気×今回9-11人気（単勝ROI 101円）
+    # ============================================================
+    if 9 <= pop <= 11 and 4 <= prev_pop <= 6:
         matched.append({
-            'name': 'S2_大頭数→少頭数',
+            'name': 'N2_中人気→穴',
             'score': 2.0,
-            'desc': f"前走{prev_hc}頭→今回{headcount}頭、今回{pop}人気"
+            'desc': f"前走{prev_pop}人気→今回{pop}人気"
         })
 
-    # S3: 前走人気1-3で着外→今回6人気以上（人気落ち馬の巻き返し）
-    if pop >= 6 and prev_pop <= 3 and prev_pos and prev_pos > 5:
+    # ============================================================
+    # N3: 前走4-6着×同コース×6人気以上（複勝ROI 73円、堅実）
+    # 前走中着で見捨てられたが実力は十分
+    # ============================================================
+    if pop >= 6 and prev_pos and 4 <= prev_pos <= 6 and prev_course == course:
         matched.append({
-            'name': 'S3_人気落ち巻返し',
-            'score': 1.8,
-            'desc': f"前走{prev_pop}人気{prev_pos}着→今回{pop}人気"
-        })
-
-    # S4: ダート×頭数12以下×6人気以上×前走1-5着（少頭数ダート穴）
-    if pop >= 6 and course == 'ダート' and 0 < headcount <= 12 and prev_pos and prev_pos <= 5:
-        matched.append({
-            'name': 'S4_少頭数ダート穴',
-            'score': 2.2,
-            'desc': f"ダート{headcount}頭立て、前走{prev_pos}着、今回{pop}人気"
-        })
-
-    # S5: 距離短縮200m以上×前走1-3着×6人気以上（距離短縮実力馬）
-    if pop >= 6 and prev_dist > 0 and distance > 0 and (distance - prev_dist) <= -200 and prev_pos and prev_pos <= 3:
-        matched.append({
-            'name': 'S5_短縮好走馬',
-            'score': 1.6,
-            'desc': f"前走{prev_dist}m→今回{distance}m(短縮{prev_dist - distance}m)、前走{prev_pos}着"
-        })
-
-    # S6: クラス上昇後に人気落ち→今回同クラスで巻返し
-    prev_rank = _class_rank(prev_class)
-    curr_rank = _class_rank(race_class)
-    if pop >= 6 and prev_rank > curr_rank >= 0 and prev_pos and prev_pos <= 5:
-        matched.append({
-            'name': 'S6_格下降巻返し',
-            'score': 1.4,
-            'desc': f"{prev_class}→{race_class}(格下げ)、前走{prev_pos}着、今回{pop}人気"
-        })
-
-    # S7: 馬体重増加+10以上×ダート×前走1-3着（充実期ダート馬）
-    if pop >= 6 and weight_diff and weight_diff >= 10 and course == 'ダート' and prev_pos and prev_pos <= 3:
-        matched.append({
-            'name': 'S7_体重増充実ダート',
+            'name': 'N3_前走中着同コース',
             'score': 1.5,
-            'desc': f"馬体重+{weight_diff}kg、ダート、前走{prev_pos}着、今回{pop}人気"
+            'desc': f"前走{prev_pos}着({course})→今回同コース、{pop}人気"
         })
 
-    # S8: 9人気以上×前走1-3着×距離同程度（超高配当候補）
-    if pop >= 9 and prev_pos and prev_pos <= 3 and abs(distance - prev_dist) <= 200:
+    # ============================================================
+    # N4: 馬体重減少-6以上×6人気以上（単勝ROI 92円）
+    # 絞れてきた馬は変身の可能性
+    # ============================================================
+    if pop >= 6 and weight_diff is not None and weight_diff <= -6:
         matched.append({
-            'name': 'S8_超穴前走好走',
-            'score': 1.3,
-            'desc': f"{pop}人気と低評価だが前走{prev_pos}着の実力馬"
+            'name': 'N4_体重絞れ',
+            'score': 1.5,
+            'desc': f"馬体重{weight_diff}kg（絞れてきた）、{pop}人気"
+        })
+
+    # ============================================================
+    # N5: 前走7-10人気×今回6-8人気（単勝ROI 88円）
+    # 前走不人気→今回少し評価上昇、まだ過小評価の余地
+    # ============================================================
+    if 6 <= pop <= 8 and 7 <= prev_pop <= 10:
+        matched.append({
+            'name': 'N5_前走不人気→今回中穴',
+            'score': 1.0,
+            'desc': f"前走{prev_pop}人気→今回{pop}人気"
+        })
+
+    # ============================================================
+    # N6: ダート10頭以下×6人気以上（複勝ROI 78円）
+    # ============================================================
+    if pop >= 6 and course == 'ダート' and 0 < headcount <= 10:
+        matched.append({
+            'name': 'N6_ダート少頭数',
+            'score': 1.5,
+            'desc': f"ダート{headcount}頭立て、{pop}人気"
+        })
+
+    # ============================================================
+    # N7: 前走4-6着×頭数減少×6人気以上（複勝ROI 75円）
+    # ============================================================
+    if pop >= 6 and prev_pos and 4 <= prev_pos <= 6 and prev_hc > 0 and headcount > 0 and headcount <= prev_hc - 2:
+        matched.append({
+            'name': 'N7_前走中着頭数減少',
+            'score': 1.5,
+            'desc': f"前走{prev_pos}着{prev_hc}頭→今回{headcount}頭、{pop}人気"
         })
 
     return matched
