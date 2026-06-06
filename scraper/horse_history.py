@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 
 from scraper.base import BaseScraper
 
-HORSE_BASE_URL = "https://db.netkeiba.com/horse/"
+HORSE_BASE_URL = "https://db.netkeiba.com/horse/result/"
 
 
 @dataclass
