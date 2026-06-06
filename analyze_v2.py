@@ -208,6 +208,87 @@ def run():
         mark = " ◆" if fr > 100 else ""
         print(f"{thr:>5.1f} {total:>6} {hr:>6.1%} {fr:>8.1f}円 {tr:>8.1f}円 {avg_odds:>8.1f}倍{mark}")
 
+    # スコア4.5以上（複数シグナル重複）の詳細
+    print("\n\n=== スコア4.5以上の詳細（単勝候補）===")
+    high = []
+    for row in rows:
+        entry = dict(row)
+        prev = {
+            'prev_pos': row['prev_pos'], 'prev_hc': row['prev_hc'],
+            'prev_dist': row['prev_dist'], 'prev_course': row['prev_course'],
+            'prev_pop': row['prev_pop'],
+        }
+        sc = len(evaluate_signals(entry, prev)) * 1.5
+        if sc >= 4.5:
+            high.append((row, sc))
+
+    hit1 = [r for r, s in high if r['finish_position'] == 1]
+    t_sum = sum(r['tansho_payout'] for r in hit1 if r['tansho_payout'])
+    t_roi = t_sum / len(high) if high else 0
+    hit3 = [r for r, s in high if r['finish_position'] and r['finish_position'] <= 3]
+    print(f"件数: {len(high)}, 1着: {len(hit1)}({len(hit1)/len(high)*100:.1f}%), 3着内: {len(hit3)}({len(hit3)/len(high)*100:.1f}%)")
+    print(f"単勝ROI: {t_roi:.1f}円")
+
+    # 月別
+    from collections import defaultdict as dd
+    monthly = dd(lambda: {'n': 0, 'win': 0, 't_sum': 0})
+    for row, sc in high:
+        m = row['date'][:7]
+        monthly[m]['n'] += 1
+        if row['finish_position'] == 1:
+            monthly[m]['win'] += 1
+            if row['tansho_payout']: monthly[m]['t_sum'] += row['tansho_payout']
+    print(f"\n{'月':>7} {'件数':>4} {'勝率':>6} {'単勝ROI':>9}")
+    for m in sorted(monthly):
+        d = monthly[m]
+        roi = d['t_sum'] / d['n'] if d['n'] > 0 else 0
+        rate = d['win'] / d['n']
+        mark = " ◆" if roi > 100 else ""
+        print(f"{m:>7} {d['n']:>4} {rate:>5.1%} {roi:>8.1f}円{mark}")
+
+    # 馬連ROI分析
+    print("\n\n=== 馬連ROI分析（スコア上位2頭の馬連）===")
+    # レース別にスコア高い2頭の馬連を調べる
+    race_horses = dd(list)
+    for row in rows:
+        entry = dict(row)
+        prev = {
+            'prev_pos': row['prev_pos'], 'prev_hc': row['prev_hc'],
+            'prev_dist': row['prev_dist'], 'prev_course': row['prev_course'],
+            'prev_pop': row['prev_pop'],
+        }
+        sc = len(evaluate_signals(entry, prev)) * 1.5
+        if sc > 0:
+            race_horses[row['race_id']].append((sc, row['horse_number'], row['finish_position']))
+
+    # 各レースで上位2頭の馬連を確認
+    bets = 0
+    wins = 0
+    pay_sum = 0
+    for race_id, horses in race_horses.items():
+        if len(horses) < 2:
+            continue
+        horses.sort(reverse=True)
+        h1, h2 = horses[0][1], horses[1][1]
+        pos1, pos2 = horses[0][2], horses[1][2]
+        # 馬連的中 = 2頭が1着2着（順不同）
+        hit = pos1 in [1, 2] and pos2 in [1, 2] and pos1 != pos2
+        combo = f"{min(h1,h2)}-{max(h1,h2)}"
+        pay = conn.execute(
+            "SELECT payout FROM payouts WHERE race_id=? AND bet_type='馬連' AND combination=?",
+            (race_id, combo)
+        ).fetchone()
+        bets += 1
+        if hit and pay:
+            wins += 1
+            pay_sum += pay[0]
+
+    if bets > 0:
+        roi = pay_sum / bets
+        print(f"シグナル上位2頭馬連: {bets}レース, 的中{wins}({wins/bets*100:.1f}%), 馬連ROI: {roi:.1f}円")
+    else:
+        print("馬連データなし")
+
     conn.close()
 
 
