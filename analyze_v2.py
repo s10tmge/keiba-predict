@@ -145,14 +145,12 @@ def run():
 
         for s in signals:
             signal_stats[s]['count'] += 1
-            if is_hit3: signal_stats[s]['hit3'] += 1
-            if is_hit1: signal_stats[s]['hit1'] += 1
-            if fp:
-                signal_stats[s]['f_valid'] += 1
-                if is_hit3: signal_stats[s]['f_sum'] += fp
-            if tp:
-                signal_stats[s]['t_valid'] += 1
-                if is_hit1: signal_stats[s]['t_sum'] += tp
+            if is_hit3:
+                signal_stats[s]['hit3'] += 1
+                if fp: signal_stats[s]['f_sum'] += fp
+            if is_hit1:
+                signal_stats[s]['hit1'] += 1
+                if tp: signal_stats[s]['t_sum'] += tp
 
         for thr in [0, 1, 2, 3, 4]:
             if score >= thr or (thr == 0 and score == 0):
@@ -169,16 +167,17 @@ def run():
                     b['t_valid'] += 1
                     if is_hit1: b['t_sum'] += tp
 
-    # シグナル別
-    print(f"{'シグナル':<25} {'件数':>5} {'複勝率':>7} {'複勝ROI':>9} {'単勝ROI':>9}")
-    print("-" * 60)
-    for name, st in sorted(signal_stats.items(), key=lambda x: -(x[1]['f_sum'] / max(x[1]['f_valid'], 1))):
+    # シグナル別 (ROI = 払戻合計 / 全ベット数)
+    print(f"{'シグナル':<25} {'件数':>5} {'複勝率':>7} {'複勝ROI':>9} {'単勝ROI':>9} {'平均払戻':>8}")
+    print("-" * 68)
+    for name, st in sorted(signal_stats.items(), key=lambda x: -(x[1]['f_sum'] / max(x[1]['count'], 1))):
         if st['count'] < 10: continue
-        fr = st['f_sum'] / st['f_valid'] if st['f_valid'] > 0 else 0
-        tr = st['t_sum'] / st['t_valid'] if st['t_valid'] > 0 else 0
+        fr = st['f_sum'] / st['count']           # 全ベット数で割る = ROI
+        tr = st['t_sum'] / st['count']
+        avg_pay = st['f_sum'] / max(st['hit3'], 1)  # 的中時平均払戻
         hr = st['hit3'] / st['count']
         mark = " ◆" if fr > 100 else ""
-        print(f"{name:<25} {st['count']:>5} {hr:>6.1%} {fr:>8.1f}円 {tr:>8.1f}円{mark}")
+        print(f"{name:<25} {st['count']:>5} {hr:>6.1%} {fr:>8.1f}円 {tr:>8.1f}円 {avg_pay:>7.0f}円{mark}")
 
     # スコア閾値別
     print(f"\n{'閾値':>5} {'件数':>6} {'複勝率':>7} {'複勝ROI':>9} {'単勝ROI':>9} {'平均オッズ':>9}")
@@ -198,15 +197,16 @@ def run():
                 subset.append(row)
 
         if len(subset) < 10: continue
+        total = len(subset)
         hit3 = [r for r in subset if r['finish_position'] and r['finish_position'] <= 3]
-        vf = [r for r in subset if r['fukusho_payout']]
-        vt = [r for r in subset if r['tansho_payout']]
-        fr = sum(r['fukusho_payout'] for r in vf if r['finish_position'] and r['finish_position'] <= 3) / len(vf) if vf else 0
-        tr = sum(r['tansho_payout'] for r in vt if r['finish_position'] == 1) / len(vt) if vt else 0
-        hr = len(hit3) / len(subset)
-        avg_odds = sum(r['odds'] or 0 for r in subset) / len(subset)
+        f_sum = sum(r['fukusho_payout'] for r in hit3 if r['fukusho_payout'])
+        t_sum = sum(r['tansho_payout'] for r in subset if r['finish_position'] == 1 and r['tansho_payout'])
+        fr = f_sum / total   # 正しいROI: 払戻合計/全ベット数
+        tr = t_sum / total
+        hr = len(hit3) / total
+        avg_odds = sum(r['odds'] or 0 for r in subset) / total
         mark = " ◆" if fr > 100 else ""
-        print(f"{thr:>5.1f} {len(subset):>6} {hr:>6.1%} {fr:>8.1f}円 {tr:>8.1f}円 {avg_odds:>8.1f}倍{mark}")
+        print(f"{thr:>5.1f} {total:>6} {hr:>6.1%} {fr:>8.1f}円 {tr:>8.1f}円 {avg_odds:>8.1f}倍{mark}")
 
     conn.close()
 
