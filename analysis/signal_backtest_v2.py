@@ -81,7 +81,12 @@ def run(db_path: str = DB_PATH):
     """
 
     rows = conn.execute(query).fetchall()
-    print(f"分析対象エントリ: {len(rows)}件\n")
+    print(f"分析対象エントリ: {len(rows)}件")
+
+    # デバッグ: payoutsの状況確認
+    pay_cnt = conn.execute("SELECT COUNT(*) FROM payouts WHERE bet_type='複勝'").fetchone()[0]
+    sample = conn.execute("SELECT combination, payout FROM payouts WHERE bet_type='複勝' LIMIT 3").fetchall()
+    print(f"payouts複勝件数: {pay_cnt}, サンプル: {[(r[0], r[1]) for r in sample]}\n")
 
     if not rows:
         print("データなし")
@@ -184,7 +189,6 @@ def run(db_path: str = DB_PATH):
     print(f"{'月':>7} {'件数':>5} {'複勝率':>7} {'複勝ROI':>9}")
     print("-" * 35)
 
-    from collections import defaultdict
     monthly = defaultdict(lambda: {'total': 0, 'hit': 0, 'pay_sum': 0, 'valid': 0})
     for r in scored:
         if r['score'] < 2.0:
