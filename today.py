@@ -91,17 +91,19 @@ def fetch_horse_histories_for_race(race_id: str, conn: sqlite3.Connection) -> No
             for rec in records:
                 write_conn.execute("""
                     INSERT OR IGNORE INTO horse_histories
-                    (horse_id, race_date, venue, race_name, race_class, course_type,
-                     distance, track_condition, headcount, frame_number, horse_number,
-                     popularity, odds, finish_position, finish_time, last_3f,
-                     horse_weight, horse_weight_diff, jockey_name)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    (horse_id, race_date, race_id, venue, race_name, race_class,
+                     course_type, distance, track_condition, headcount, frame_number,
+                     horse_number, popularity, odds, finish_position, finish_time,
+                     last_3f, horse_weight, horse_weight_diff, weight_carried,
+                     corner_position, jockey_name)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
-                    rec.horse_id, rec.race_date, rec.venue, rec.race_name,
+                    rec.horse_id, rec.race_date, rec.race_id, rec.venue, rec.race_name,
                     rec.race_class, rec.course_type, rec.distance, rec.track_condition,
                     rec.headcount, rec.frame_number, rec.horse_number, rec.popularity,
                     rec.odds, rec.finish_position, rec.finish_time, rec.last_3f,
-                    rec.horse_weight, rec.horse_weight_diff, rec.jockey_name,
+                    rec.horse_weight, rec.horse_weight_diff, rec.weight_carried,
+                    rec.corner_position, rec.jockey_name,
                 ))
 
     write_conn.close()

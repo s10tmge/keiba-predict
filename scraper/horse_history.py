@@ -18,13 +18,14 @@ HORSE_BASE_URL = "https://db.netkeiba.com/horse/result/"
 @dataclass
 class HorseRaceRecord:
     horse_id: str
-    race_date: str          # YYYY-MM-DD
+    race_date: str           # YYYY-MM-DD
+    race_id: str | None      # netkeibaのレースID（B_3Fジョイン用）
     venue: str
     race_name: str
     race_class: str
-    course_type: str        # 芝/ダート
+    course_type: str         # 芝/ダート
     distance: int
-    track_condition: str    # 良/稍重/重/不良
+    track_condition: str     # 良/稍重/重/不良
     headcount: int
     frame_number: int | None
     horse_number: int | None
@@ -35,7 +36,8 @@ class HorseRaceRecord:
     last_3f: float | None
     horse_weight: int | None
     horse_weight_diff: int | None
-    jockey_name: str
+    weight_carried: float | None  # 斤量 (kg)
+    corner_position: str | None   # 通過順位 (例: "3-3-2-1")
 
 
 class HorseHistoryScraper(BaseScraper):
@@ -62,21 +64,23 @@ class HorseHistoryScraper(BaseScraper):
                     return i
             return -1
 
-        idx_date  = col("日付")
-        idx_venue = col("開催")
-        idx_name  = col("レース名")
-        idx_hc    = col("頭数")
-        idx_frame = col("枠番")
-        idx_num   = col("馬番")
-        idx_pop   = col("人気")
-        idx_odds  = col("オッズ")
-        idx_pos   = col("着順")
-        idx_time  = col("タイム")
-        idx_3f    = col("上り")
-        idx_body  = col("馬体重")
-        idx_dist  = col("距離")
-        idx_cond  = col("馬場")
-        idx_jock  = col("騎手")
+        idx_date   = col("日付")
+        idx_venue  = col("開催")
+        idx_name   = col("レース名")
+        idx_hc     = col("頭数")
+        idx_frame  = col("枠番")
+        idx_num    = col("馬番")
+        idx_pop    = col("人気")
+        idx_odds   = col("オッズ")
+        idx_pos    = col("着順")
+        idx_time   = col("タイム")
+        idx_3f     = col("上り")
+        idx_body   = col("馬体重")
+        idx_dist   = col("距離")
+        idx_cond   = col("馬場")
+        idx_jock   = col("騎手")
+        idx_kilo   = col("斤量")
+        idx_corner = col("通過")
 
         records = []
         for row in table.select("tr")[1:]:
@@ -131,9 +135,23 @@ class HorseHistoryScraper(BaseScraper):
             venue_raw = get(idx_venue)
             venue = re.sub(r"\d+回|\d+日目", "", venue_raw).strip()
 
+            # race_id: レース名セルのリンクから抽出 /race/202506050811/
+            race_id = None
+            if idx_name >= 0 and idx_name < len(cols):
+                link = cols[idx_name].select_one("a[href*='/race/']")
+                if link:
+                    m = re.search(r"/race/(\d+)/", link.get("href", ""))
+                    if m:
+                        race_id = m.group(1)
+
+            # 通過順位（コーナー通過順）
+            corner_raw = get(idx_corner)
+            corner_position = corner_raw if corner_raw else None
+
             records.append(HorseRaceRecord(
                 horse_id=horse_id,
                 race_date=race_date,
+                race_id=race_id,
                 venue=venue,
                 race_name=get(idx_name),
                 race_class=self._parse_class(get(idx_name)),
@@ -150,6 +168,8 @@ class HorseHistoryScraper(BaseScraper):
                 last_3f=to_float(get(idx_3f)),
                 horse_weight=horse_weight,
                 horse_weight_diff=horse_weight_diff,
+                weight_carried=to_float(get(idx_kilo)),
+                corner_position=corner_position,
                 jockey_name=get(idx_jock),
             ))
 

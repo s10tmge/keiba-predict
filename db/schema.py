@@ -83,26 +83,29 @@ CREATE TABLE IF NOT EXISTS results (
 
 SQL_CREATE_HORSE_HISTORIES = """
 CREATE TABLE IF NOT EXISTS horse_histories (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    horse_id        TEXT    NOT NULL,
-    race_date       TEXT    NOT NULL,     -- YYYY-MM-DD
-    venue           TEXT,
-    race_name       TEXT,
-    race_class      TEXT,                 -- G1/G2/G3/OP/3勝/2勝/1勝/未勝利
-    course_type     TEXT,                 -- 芝/ダート
-    distance        INTEGER,
-    track_condition TEXT,                 -- 良/稍重/重/不良
-    headcount       INTEGER,              -- 出走頭数
-    frame_number    INTEGER,
-    horse_number    INTEGER,
-    popularity      INTEGER,
-    odds            REAL,
-    finish_position INTEGER,
-    finish_time     TEXT,
-    last_3f         REAL,                 -- 上がり3ハロン
-    horse_weight    INTEGER,
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    horse_id          TEXT    NOT NULL,
+    race_date         TEXT    NOT NULL,     -- YYYY-MM-DD
+    race_id           TEXT,                 -- netkeibaのレースID（B_3Fジョイン用）
+    venue             TEXT,
+    race_name         TEXT,
+    race_class        TEXT,                 -- G1/G2/G3/OP/3勝/2勝/1勝/未勝利
+    course_type       TEXT,                 -- 芝/ダート
+    distance          INTEGER,
+    track_condition   TEXT,                 -- 良/稍重/重/不良
+    headcount         INTEGER,              -- 出走頭数
+    frame_number      INTEGER,
+    horse_number      INTEGER,
+    popularity        INTEGER,
+    odds              REAL,
+    finish_position   INTEGER,
+    finish_time       TEXT,
+    last_3f           REAL,                 -- 上がり3ハロン
+    horse_weight      INTEGER,
     horse_weight_diff INTEGER,
-    jockey_name     TEXT,
+    weight_carried    REAL,                 -- 斤量 (kg)
+    corner_position   TEXT,                 -- 通過順位 (例: "3-3-2-1")
+    jockey_name       TEXT,
     UNIQUE (horse_id, race_date, race_name)
 )
 """
@@ -151,14 +154,36 @@ ALL_CREATE_STATEMENTS = [
     SQL_CREATE_PAYOUTS,
     SQL_CREATE_PREDICTIONS,
     *SQL_CREATE_INDEXES,
-    "CREATE INDEX IF NOT EXISTS idx_horse_hist_horse ON horse_histories(horse_id)",
-    "CREATE INDEX IF NOT EXISTS idx_horse_hist_date  ON horse_histories(race_date)",
+    "CREATE INDEX IF NOT EXISTS idx_horse_hist_horse   ON horse_histories(horse_id)",
+    "CREATE INDEX IF NOT EXISTS idx_horse_hist_date    ON horse_histories(race_date)",
+    "CREATE INDEX IF NOT EXISTS idx_horse_hist_race_id ON horse_histories(race_id)",
+]
+
+# 既存DBに不足カラムを追加するマイグレーション（ALTER TABLE ADD COLUMN は冪等）
+SQL_MIGRATIONS = [
+    "ALTER TABLE horse_histories ADD COLUMN race_id TEXT",
+    "ALTER TABLE horse_histories ADD COLUMN weight_carried REAL",
+    "ALTER TABLE horse_histories ADD COLUMN corner_position TEXT",
 ]
 
 
 # =========================================================
 # 初期化関数
 # =========================================================
+
+def migrate_db(db_path: str = DB_PATH) -> None:
+    """既存DBに新カラムを追加する（冪等: カラムが既にあればスキップ）。"""
+    conn = sqlite3.connect(db_path)
+    try:
+        for sql in SQL_MIGRATIONS:
+            try:
+                conn.execute(sql)
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass  # カラムが既に存在する場合はスキップ
+    finally:
+        conn.close()
+
 
 def init_db(db_path: str = DB_PATH) -> None:
     """
@@ -182,6 +207,9 @@ def init_db(db_path: str = DB_PATH) -> None:
         logger.info("全テーブルの作成が完了しました。")
     finally:
         conn.close()
+
+    # 既存DBへのカラム追加（新規作成時は空振りするだけで無害）
+    migrate_db(db_path)
 
 
 def save_race_list(races, db_path: str = DB_PATH) -> None:
