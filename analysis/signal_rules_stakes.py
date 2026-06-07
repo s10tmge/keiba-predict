@@ -25,9 +25,12 @@ analysis/signal_rules_stakes.py - 重賞専用スコアリングロジック
   S5: 7-9人気  × 前走1着                       → 単勝152円  複勝120円  n=111
   S6: 7-11人気 × 距離延長(100m超) × 前走1-3着   → 単勝153円  複勝 92円  n=96  ★ NEW
 
-3F偏差（prev_last3f - last_3f: 正=今走が速い）:
-  遅化0.5秒以上 → 単勝53円（マイナスシグナル）
-  速化0.5秒以上 × 穴馬7-11人気 → 単勝136円
+B_3F偏差（前走レースの全馬平均3F - その馬の前走3F: 正=平均より速い=能力あり）:
+  ※ 予測時点で使える値。今走の3Fは使わない（レース後にしかわからないため）。
+  偏差+1.0秒以上 × 穴馬7-11人気 → +2.5点
+  偏差+0.5秒以上 × 穴馬7-11人気 → +1.5点
+  偏差-0.5秒以下 × 穴馬7-11人気 → -2.0点（M2）
+  ※ 重賞での定量検証は未完。race_avg_3fが渡された場合のみ有効化。
 
 マイナスシグナル:
   M1: 10人気+ × 前走7着以下: 単勝35円 → -2.0点
@@ -71,11 +74,14 @@ def score_stakes(entry: dict, prev: Optional[dict],
     prev_pos = prev.get('finish_position') or prev.get('prev_pos')
     course = entry.get('course_type', '')
 
-    # 3F差計算（前走3F - 今走3F: 正 = 今走が速い）
-    entry_3f = entry.get('last_3f')
+    # 前走3F偏差（予測に使える値）
+    # = (前走レースの全馬平均3F) - (その馬の前走3F)
+    # 正 = 平均より速い = 能力あり
+    # ※ race_avg_3f は今走レースではなく「前走レース」の平均。呼び出し元が渡す。
     prev_3f = prev.get('last_3f') or prev.get('prev_last3f')
+    race_avg_3f = entry.get('race_avg_3f')  # 前走レースの全馬平均3F
     try:
-        f3_diff = float(prev_3f) - float(entry_3f)  # 正=今走が速い
+        f3_diff = float(race_avg_3f) - float(prev_3f)  # 正=平均より速い=能力あり
     except (TypeError, ValueError):
         f3_diff = None
 
@@ -163,22 +169,24 @@ def score_stakes(entry: dict, prev: Optional[dict],
         })
 
     # -------------------------------------------------------
-    # B_3F: 前走3F偏差ボーナス
-    # 前走より今走が速い = 調子上昇。穴馬帯で効果的。
-    # （全体: 速化0.5秒以上×7-11人気 → 単勝136円, n=225）
+    # B_3F: 前走3F偏差ボーナス（予測時点で使える値）
+    # 前走レースの全馬平均3Fと比較した偏差。
+    # 平均より速い = その馬の能力が高い可能性。
+    # ※ 重賞での検証は未完（race_avg_3fのjoinデータが不足）。
+    #    実運用時に race_avg_3f を渡すことで有効化。
     # -------------------------------------------------------
     if f3_diff is not None and 7 <= pop <= 11:
         if f3_diff >= 1.0:
             signals.append({
-                'name': 'B_3F速化大',
+                'name': 'B_3F偏差大',
                 'score': 2.5,
-                'desc': f"前走比3F+{f3_diff:.1f}秒速化"
+                'desc': f"前走3F 平均比+{f3_diff:.1f}秒（能力高め）"
             })
         elif f3_diff >= 0.5:
             signals.append({
-                'name': 'B_3F速化',
+                'name': 'B_3F偏差',
                 'score': 1.5,
-                'desc': f"前走比3F+{f3_diff:.1f}秒速化"
+                'desc': f"前走3F 平均比+{f3_diff:.1f}秒"
             })
 
     # -------------------------------------------------------
@@ -210,12 +218,13 @@ def score_stakes(entry: dict, prev: Optional[dict],
                 'desc': f"今回{pop}人気×前走{prev_pos}着"
             })
 
-    # M2: 前走3F遅化（単勝ROI 53円, n=240）
+    # M2: 前走3F偏差マイナス（平均より遅い = 能力不足の可能性）
+    # ※ B_3Fと同じく race_avg_3f が渡された場合のみ有効
     if f3_diff is not None and f3_diff <= -0.5 and 7 <= pop <= 11:
         signals.append({
-            'name': 'M2_3F遅化',
+            'name': 'M2_3F偏差マイナス',
             'score': -2.0,
-            'desc': f"前走比3F{f3_diff:.1f}秒遅化"
+            'desc': f"前走3F 平均比{f3_diff:.1f}秒（平均以下）"
         })
 
     total = sum(s['score'] for s in signals)
