@@ -56,7 +56,10 @@ class HorseHistoryScraper(BaseScraper):
         if not table:
             return []
 
-        headers = [th.get_text(strip=True) for th in table.select("tr:first-child th")]
+        headers = [
+            cell.get_text(strip=True)
+            for cell in table.select("tr:first-child th, tr:first-child td")
+        ]
 
         def col(name: str) -> int:
             for i, h in enumerate(headers):
