@@ -38,6 +38,7 @@ class HorseRaceRecord:
     horse_weight_diff: int | None
     weight_carried: float | None  # 斤量 (kg)
     corner_position: str | None   # 通過順位 (例: "3-3-2-1")
+    jockey_name: str
 
 
 class HorseHistoryScraper(BaseScraper):
