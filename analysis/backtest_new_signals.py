@@ -405,11 +405,6 @@ def main(grade_filter: str):
         prev_rid = row['prev_race_id']
         prev_3f = row['prev_3f']
         prev_pos = row['prev_pos']
-        prev_time = row['finish_time']  # 今走ではなく前走のタイム
-        # ※ SQLのprev側のfinish_timeをhとして取得しているのでrow['finish_time']は今走
-        # horse_historiesのfinish_timeをprev側で取得する必要がある
-        # → クエリにprev finish_timeを追加していないので今回はskip、別途対応
-
         if not prev_rid or not prev_3f:
             continue
         avg = race_avg_3f.get(prev_rid)
@@ -423,7 +418,7 @@ def main(grade_filter: str):
 
         # タイム差チェック（前走の勝ち馬タイムと比較）
         winner_t = winner_time_map.get(prev_rid)
-        horse_prev_time = row['prev_finish_time'] if 'prev_finish_time' in row.keys() else None
+        horse_prev_time = row['prev_finish_time']
 
         if winner_t and horse_prev_time:
             wt = parse_time(winner_t)
