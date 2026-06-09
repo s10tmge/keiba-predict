@@ -10,6 +10,7 @@ analysis/signal_rules_stakes.py - 重賞専用スコアリングロジック
   単勝は穴馬シグナルが強い場合のみ。
 
   ※ 体重シグナルは重賞では無効（ROI 30〜36円）のため不採用。
+  ※ B_3F（上がり3F偏差）は重賞では逆効果（速いほど低ROI）のため除外。
   ※ 平場ロジックは analysis/signal_rules.py を使用。
 
 軸馬（1〜3人気）信頼度の根拠:
@@ -18,24 +19,24 @@ analysis/signal_rules_stakes.py - 重賞専用スコアリングロジック
   3人気を軸にした馬連ROI: 780円  三連複ROI: 3668円  n=115
 
 検証済みROI（重賞全体・n>=30）:
-  S1: 9-11人気 × 前走1-3人気                  → 単勝149円  複勝122円  n=113
-  S2: 9-13人気 × 前走4-6人気 × 前走7着以下      → 単勝271円  複勝135円  n=58  ※9-13に拡張
-  S3: 7-9人気  × 前走4-6人気 × 前走1-3着        → 単勝289円  複勝153円  n=36  ★
-  S4: 7-9人気  × 前走着順改善                  → 単勝160円  複勝 94円  n=164
-  S5: 7-9人気  × 前走1着                       → 単勝152円  複勝120円  n=111
-  S6: 7-11人気 × 距離延長(100m超) × 前走1-3着   → 単勝153円  複勝 92円  n=96  ★ NEW
-
-B_3F偏差（前走レースの全馬平均3F - その馬の前走3F: 正=平均より速い=能力あり）:
-  ※ 予測時点で使える値。今走の3Fは使わない（レース後にしかわからないため）。
-  偏差+1.0秒以上 × 穴馬7-11人気 → +2.5点
-  偏差+0.5秒以上 × 穴馬7-11人気 → +1.5点
-  偏差-0.5秒以下 × 穴馬7-11人気 → -2.0点（M2）
-  ※ 重賞での定量検証は未完。race_avg_3fが渡された場合のみ有効化。
+  S1: 9-11人気 × 前走1-3人気                           → 単勝149円  複勝122円  n=113
+  S2: 9-13人気 × 前走4-6人気 × 前走7着以下               → 単勝271円  複勝135円  n=58
+  S3: 7-9人気  × 前走4-6人気 × 前走1-3着                 → 単勝289円  複勝153円  n=36
+  S4: 7-9人気  × 前走着順改善                            → 単勝160円  複勝 94円  n=164
+  S5: 7-9人気  × 前走1着                                → 単勝152円  複勝120円  n=111
+  S6: 7-11人気 × 距離延長(100m超) × 前走1-3着             → 単勝153円  複勝 92円  n=96
+  S7: 逃げ先行(前走4角25%以内) × 距離変化±100m以内         → 単勝199円            n=109
+  S8: 後方(前走4角71%以上) × 前走7着以下                  → 単勝166円            n=60
 
 マイナスシグナル:
   M1: 10人気+ × 前走7着以下: 単勝35円 → -2.0点
       ただし S1(prev_pop=1-3)の場合は適用しない
-  M2: 前走3F遅化0.5秒以上: 単勝53円 → -2.0点
+  M3: 中団(前走4角26-70%) × 7-9人気: 単勝36円 → -1.5点
+
+脚質判定: 前走4角通過順位 ÷ 前走頭数
+  0〜25%  = 逃げ/先行（S7対象）
+  26〜70% = 中団（M3対象）
+  71〜100% = 後方（S8対象）
 
 人気上限の根拠:
   S1: 9-13拡張はROI低下（149→107円）のため 9-11 維持
@@ -44,6 +45,30 @@ B_3F偏差（前走レースの全馬平均3F - その馬の前走3F: 正=平均
 """
 
 from typing import Optional
+
+
+def _pace_style(corner_position: Optional[str], headcount: Optional[int]) -> Optional[str]:
+    """
+    前走4角通過順位と頭数から脚質を判定する。
+    corner_position: "3-3-2-1" 形式。最後の値を4角順位として使用。
+    Returns: "逃先行" | "中団" | "後方" | None
+    """
+    if not corner_position or not headcount or headcount <= 0:
+        return None
+    parts = [p.strip() for p in str(corner_position).split('-') if p.strip().isdigit()]
+    if not parts:
+        return None
+    try:
+        last_pos = int(parts[-1])
+        ratio = last_pos / headcount
+        if ratio <= 0.25:
+            return "逃先行"
+        elif ratio <= 0.70:
+            return "中団"
+        else:
+            return "後方"
+    except (ValueError, ZeroDivisionError):
+        return None
 
 
 def score_stakes(entry: dict, prev: Optional[dict],
@@ -72,24 +97,17 @@ def score_stakes(entry: dict, prev: Optional[dict],
     pop = entry.get('popularity') or 0
     prev_pop = prev.get('popularity') or prev.get('prev_pop') or 0
     prev_pos = prev.get('finish_position') or prev.get('prev_pos')
-    course = entry.get('course_type', '')
-
-    # 前走3F偏差（予測に使える値）
-    # = (前走レースの全馬平均3F) - (その馬の前走3F)
-    # 正 = 平均より速い = 能力あり
-    # ※ race_avg_3f は今走レースではなく「前走レース」の平均。呼び出し元が渡す。
-    prev_3f = prev.get('last_3f') or prev.get('prev_last3f')
-    race_avg_3f = entry.get('race_avg_3f')  # 前走レースの全馬平均3F
-    try:
-        f3_diff = float(race_avg_3f) - float(prev_3f)  # 正=平均より速い=能力あり
-    except (TypeError, ValueError):
-        f3_diff = None
 
     # 距離変化
     try:
         dist_diff = int(entry.get('distance') or 0) - int(prev.get('distance') or prev.get('prev_dist') or 0)
     except (TypeError, ValueError):
         dist_diff = 0
+
+    # 脚質判定（前走コーナー通過順位と頭数から）
+    prev_corner = prev.get('corner_position') or prev.get('prev_corner_position')
+    prev_headcount = prev.get('headcount') or prev.get('prev_headcount')
+    pace = _pace_style(prev_corner, prev_headcount)
 
     signals = []
 
@@ -169,25 +187,26 @@ def score_stakes(entry: dict, prev: Optional[dict],
         })
 
     # -------------------------------------------------------
-    # B_3F: 前走3F偏差ボーナス（予測時点で使える値）
-    # 前走レースの全馬平均3Fと比較した偏差。
-    # 平均より速い = その馬の能力が高い可能性。
-    # ※ 重賞での検証は未完（race_avg_3fのjoinデータが不足）。
-    #    実運用時に race_avg_3f を渡すことで有効化。
+    # S7: 逃げ/先行 × 距離変化±100m以内（単勝ROI 199円, n=109）
+    # 逃げ先行馬が距離変化の少ないレースで同じ戦法を取れる
     # -------------------------------------------------------
-    if f3_diff is not None and 7 <= pop <= 11:
-        if f3_diff >= 1.0:
-            signals.append({
-                'name': 'B_3F偏差大',
-                'score': 2.5,
-                'desc': f"前走3F 平均比+{f3_diff:.1f}秒（能力高め）"
-            })
-        elif f3_diff >= 0.5:
-            signals.append({
-                'name': 'B_3F偏差',
-                'score': 1.5,
-                'desc': f"前走3F 平均比+{f3_diff:.1f}秒"
-            })
+    if pace == "逃先行" and abs(dist_diff) <= 100 and 7 <= pop <= 11:
+        signals.append({
+            'name': 'S7_逃先行距離同等',
+            'score': 2.0,
+            'desc': f"前走逃先行×距離変化{dist_diff:+d}m×{pop}人気"
+        })
+
+    # -------------------------------------------------------
+    # S8: 後方脚質 × 前走7着以下（単勝ROI 166円, n=60）
+    # 後方から上がり脚を使うタイプが前走大敗後に嫌われているパターン
+    # -------------------------------------------------------
+    if pace == "後方" and prev_pos and prev_pos >= 7 and 7 <= pop <= 11:
+        signals.append({
+            'name': 'S8_後方前走大敗',
+            'score': 2.0,
+            'desc': f"前走後方{prev_pos}着→今回{pop}人気"
+        })
 
     # -------------------------------------------------------
     # D_騎手: 騎手勝率ボーナス（補助シグナル）
@@ -227,13 +246,13 @@ def score_stakes(entry: dict, prev: Optional[dict],
                 'desc': f"今回{pop}人気×前走{prev_pos}着"
             })
 
-    # M2: 前走3F偏差マイナス（平均より遅い = 能力不足の可能性）
-    # ※ B_3Fと同じく race_avg_3f が渡された場合のみ有効
-    if f3_diff is not None and f3_diff <= -0.5 and 7 <= pop <= 11:
+    # M3: 中団脚質 × 7-9人気（単勝ROI 36円 = 大幅マイナス期待値）
+    # 中団は展開に恵まれないと脚を使えないため、穴馬としての爆発力に欠ける
+    if pace == "中団" and 7 <= pop <= 9:
         signals.append({
-            'name': 'M2_3F偏差マイナス',
-            'score': -2.0,
-            'desc': f"前走3F 平均比{f3_diff:.1f}秒（平均以下）"
+            'name': 'M3_中団穴馬',
+            'score': -1.5,
+            'desc': f"前走中団×{pop}人気（展開依存・穴として弱い）"
         })
 
     total = sum(s['score'] for s in signals)
