@@ -2,11 +2,13 @@
 analysis/backtest_new_signals.py - 新データを使ったシグナル検証
 
 検証対象:
-  1. B_3F     : 前走3F偏差（race_idジョインで初めて検証可能）
-  2. 脚質      : 前走4角位置取り比率（corner_positionから算出）
-  3. 斤量減    : 前走比-2kg以上の斤量減ブースト
-  4. 斤量比率  : 斤量÷馬体重 > 12.5% のデバフ
-  5. 前走グレード: 前走G1/G2/G3か否かで既存シグナルの精度が変わるか
+  1. B_3F          : 前走3F偏差
+  2. 脚質           : 前走4角位置取り比率
+  3. 斤量           : 斤量減ブースト・斤量比率デバフ
+  4. 前走グレード    : 前走G1/G2/G3か否か
+  5. 脚質×距離延長  : 逃げ先行×距離延長 / 後方×前走好走
+  6. 脚質マイナス   : 中団＝消し方向に使えるか
+  7. 展開負けポテンシャル: 前走3F速い×中位着順×勝ち馬との僅差
 
 実行:
   python -m analysis.backtest_new_signals          # 重賞のみ
@@ -69,6 +71,7 @@ def main(grade_filter: str):
         h.weight_carried AS prev_kilo,
         h.corner_position AS prev_corner,
         h.headcount      AS prev_hc,
+        h.finish_time    AS prev_finish_time,
         -- 2走前
         h2.finish_position AS prev2_pos
     FROM entries e
@@ -99,14 +102,32 @@ def main(grade_filter: str):
       {gf}
     """).fetchall()
 
-    # prev_race_id -> avg_3f のマッピングを作成（entriesから）
+    # prev_race_id -> avg_3f のマッピング（entriesから）
     race_avg_3f = {}
     for rr in conn.execute(
         "SELECT race_id, AVG(last_3f) as avg FROM entries WHERE last_3f IS NOT NULL GROUP BY race_id"
     ):
         race_avg_3f[rr['race_id']] = rr['avg']
 
+    # prev_race_id -> 勝ち馬タイム（horse_historiesから）
+    winner_time_map = {}
+    for rr in conn.execute("""
+        SELECT race_id, finish_time FROM horse_histories
+        WHERE finish_position = 1 AND race_id IS NOT NULL AND finish_time IS NOT NULL
+    """):
+        winner_time_map[rr['race_id']] = rr['finish_time']
+
     conn.close()
+
+    def parse_time(t: str):
+        """タイム文字列 '1:33.5' を秒に変換"""
+        try:
+            if ':' in t:
+                m, s = t.split(':')
+                return int(m) * 60 + float(s)
+            return float(t)
+        except (ValueError, AttributeError):
+            return None
 
     print(f"\n対象データ: {len(rows)}件  ({grade_filter})")
     print("=" * 65)
@@ -291,7 +312,136 @@ def main(grade_filter: str):
         if s3_by_grade[grade]:
             print(f"  前走{grade:6s}: {roi(s3_by_grade[grade])}")
 
+    # -------------------------------------------------------
+    # 5. 脚質の掘り下げ
+    # -------------------------------------------------------
+    print("\n【5. 脚質の掘り下げ】")
+
+    # 5a. 逃げ先行 × 距離延長（スタミナ消耗リスク）
+    print("  ── 逃げ先行(0-25%) × 距離変化 ──")
+    front_ext = []   # 距離延長100m超
+    front_same = []  # 距離±100m
+    front_short = [] # 距離短縮100m超
+    for row in rows:
+        pop = row['popularity']
+        if not (7 <= pop <= 11):
+            continue
+        ratio = parse_last_corner(row['prev_corner'], row['prev_hc'])
+        if ratio is None or ratio > 0.25:
+            continue
+        if not row['prev_dist'] or not row['cur_dist']:
+            continue
+        dd = row['cur_dist'] - row['prev_dist']
+        if dd > 100:
+            front_ext.append(row['tansho'])
+        elif dd < -100:
+            front_short.append(row['tansho'])
+        else:
+            front_same.append(row['tansho'])
+    print(f"  距離延長100m超: {roi(front_ext)}")
+    print(f"  距離±100m    : {roi(front_same)}")
+    print(f"  距離短縮100m超: {roi(front_short)}")
+
+    # 5b. 後方 × 前走好走（差し馬で前走着順良い）
+    print("\n  ── 後方(71-100%) × 前走着順 ──")
+    back_good = []  # 前走1-3着
+    back_mid = []   # 前走4-6着
+    back_bad = []   # 前走7着以下
+    for row in rows:
+        pop = row['popularity']
+        if not (7 <= pop <= 11):
+            continue
+        ratio = parse_last_corner(row['prev_corner'], row['prev_hc'])
+        if ratio is None or ratio <= 0.70:
+            continue
+        pp = row['prev_pos']
+        if not pp:
+            continue
+        if pp <= 3:
+            back_good.append(row['tansho'])
+        elif pp <= 6:
+            back_mid.append(row['tansho'])
+        else:
+            back_bad.append(row['tansho'])
+    print(f"  前走1-3着: {roi(back_good)}")
+    print(f"  前走4-6着: {roi(back_mid)}")
+    print(f"  前走7着以下: {roi(back_bad)}")
+
+    # 5c. 中団 × マイナスシグナル（消し方向）
+    print("\n  ── 中団(26-70%) × 今回人気帯別 ──")
+    mid_buckets = defaultdict(list)
+    for row in rows:
+        pop = row['popularity']
+        ratio = parse_last_corner(row['prev_corner'], row['prev_hc'])
+        if ratio is None or not (0.26 <= ratio <= 0.70):
+            continue
+        if 4 <= pop <= 6:
+            mid_buckets['4-6人気'].append(row['tansho'])
+        elif 7 <= pop <= 9:
+            mid_buckets['7-9人気'].append(row['tansho'])
+        elif 10 <= pop <= 13:
+            mid_buckets['10-13人気'].append(row['tansho'])
+    for label in ['4-6人気', '7-9人気', '10-13人気']:
+        if mid_buckets[label]:
+            print(f"  中団×{label}: {roi(mid_buckets[label])}")
+
+    # -------------------------------------------------------
+    # 6. 展開負けポテンシャル馬
+    # 前走: 3F偏差プラス × 着順4-8着 × 勝ち馬とのタイム差0.5秒以内
+    # -------------------------------------------------------
+    print("\n【6. 展開負けポテンシャル馬】")
+    print("  条件: 前走3F偏差+0.5以上 × 前走4-8着 × 勝ち馬とのタイム差0.5秒以内")
+
+    potential = []
+    potential_strict = []  # タイム差0.3秒以内
+    base_7_11 = []  # 同じ人気帯のベースライン
+
+    for row in rows:
+        pop = row['popularity']
+        if not (7 <= pop <= 11):
+            continue
+        base_7_11.append(row['tansho'])
+
+        prev_rid = row['prev_race_id']
+        prev_3f = row['prev_3f']
+        prev_pos = row['prev_pos']
+        prev_time = row['finish_time']  # 今走ではなく前走のタイム
+        # ※ SQLのprev側のfinish_timeをhとして取得しているのでrow['finish_time']は今走
+        # horse_historiesのfinish_timeをprev側で取得する必要がある
+        # → クエリにprev finish_timeを追加していないので今回はskip、別途対応
+
+        if not prev_rid or not prev_3f:
+            continue
+        avg = race_avg_3f.get(prev_rid)
+        if not avg:
+            continue
+        f3_diff = avg - prev_3f
+        if f3_diff < 0.5:
+            continue
+        if not prev_pos or not (4 <= prev_pos <= 8):
+            continue
+
+        # タイム差チェック（前走の勝ち馬タイムと比較）
+        winner_t = winner_time_map.get(prev_rid)
+        horse_prev_time = row['prev_finish_time'] if 'prev_finish_time' in row.keys() else None
+
+        if winner_t and horse_prev_time:
+            wt = parse_time(winner_t)
+            ht = parse_time(horse_prev_time)
+            if wt and ht:
+                diff = ht - wt
+                if diff <= 0.5:
+                    potential.append(row['tansho'])
+                if diff <= 0.3:
+                    potential_strict.append(row['tansho'])
+        else:
+            potential.append(row['tansho'])
+
+    print(f"  ベースライン(7-11人気全体): {roi(base_7_11)}")
+    print(f"  3F速い×4-8着(タイム差問わず): {roi(potential)}")
+    print(f"  3F速い×4-8着×タイム差0.3秒以内: {roi(potential_strict)}")
     print()
+    print("  ※ タイム差を正確に計算するにはクエリ更新が必要。上は近似値。")
 
 
 if __name__ == '__main__':
