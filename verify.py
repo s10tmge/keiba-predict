@@ -74,8 +74,11 @@ LEFT JOIN payouts pay_t ON pay_t.race_id = e.race_id AND pay_t.bet_type = '単�
   AND pay_t.combination = CAST(e.horse_number AS TEXT)
 LEFT JOIN payouts pay_f ON pay_f.race_id = e.race_id AND pay_f.bet_type = '複勝'
   AND pay_f.combination = CAST(e.horse_number AS TEXT)
-WHERE r.race_class IN ('G1','G2','G3')
-  AND r.course_type = '芝'
+WHERE r.race_id IN (
+    SELECT DISTINCT race_id FROM horse_histories
+    WHERE race_class IN ('G1','G2','G3')
+  )
+  AND TRIM(r.course_type) = '芝'
   AND res.finish_position IS NOT NULL
 """
 
