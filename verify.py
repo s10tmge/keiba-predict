@@ -253,6 +253,200 @@ def main():
         sub = [r for r in s7_base if r['frame_number'] and lo<=r['frame_number']<=hi]
         roi_summary(sub, f"S7×{label}")
 
+    # ============================================================
+    # 新シグナル候補1: 休み明け（前走から中10週以上）
+    # ============================================================
+    print("\n" + "="*60)
+    print("【新候補1】休み明け（前走から中10週以上）× 穴馬帯")
+    print("="*60)
+
+    rows_dated = conn.execute(BASE_SQL.replace(
+        "LEFT JOIN horse_histories hh ON hh.horse_id = e.horse_id",
+        "LEFT JOIN horse_histories hh ON hh.horse_id = e.horse_id"
+    ) + " AND hh.race_date IS NOT NULL").fetchall()
+
+    # race_dateとhh.race_dateの差（日数）を計算
+    import datetime
+    def weeks_since_prev(race_date_str, prev_date_str):
+        try:
+            d1 = datetime.date.fromisoformat(race_date_str)
+            d2 = datetime.date.fromisoformat(prev_date_str)
+            return (d1 - d2).days / 7
+        except:
+            return None
+
+    rows_w = conn.execute("""
+        SELECT e.popularity, e.frame_number,
+               res.finish_position,
+               r.date AS race_date,
+               hh.race_date AS prev_date,
+               pay_t.payout AS tansho,
+               pay_f.payout AS fukusho
+        FROM entries e
+        JOIN races r ON r.race_id = e.race_id
+        JOIN results res ON res.race_id = e.race_id AND res.horse_id = e.horse_id
+        LEFT JOIN horse_histories hh ON hh.horse_id = e.horse_id
+          AND hh.race_date = (
+            SELECT MAX(h2.race_date) FROM horse_histories h2
+            WHERE h2.horse_id = e.horse_id AND h2.race_date < r.date
+          )
+        LEFT JOIN payouts pay_t ON pay_t.race_id = e.race_id AND pay_t.bet_type = '単勝'
+          AND pay_t.combination = CAST(e.horse_number AS TEXT)
+        LEFT JOIN payouts pay_f ON pay_f.race_id = e.race_id AND pay_f.bet_type = '複勝'
+          AND pay_f.combination = CAST(e.horse_number AS TEXT)
+        WHERE (r.race_name LIKE '%(G1)%' OR r.race_name LIKE '%(G2)%' OR r.race_name LIKE '%(G3)%'
+            OR r.race_name LIKE '%（G1）%' OR r.race_name LIKE '%（G2）%' OR r.race_name LIKE '%（G3）%')
+          AND TRIM(r.course_type) = '芝'
+          AND res.finish_position IS NOT NULL
+          AND hh.race_date IS NOT NULL
+    """).fetchall()
+
+    for label, w_lo, w_hi, pop_lo, pop_hi in [
+        ("中10週以上(全人気)", 10, 999, 1, 18),
+        ("中10週以上×穴馬7-11人気", 10, 999, 7, 11),
+        ("中6-9週×穴馬7-11人気", 6, 9, 7, 11),
+        ("中5週以内×穴馬7-11人気", 0, 5, 7, 11),
+        ("連闘〜中2週×穴馬7-11人気", 0, 2, 7, 11),
+    ]:
+        sub = []
+        for r in rows_w:
+            if not (pop_lo <= (r['popularity'] or 0) <= pop_hi):
+                continue
+            w = weeks_since_prev(r['race_date'], r['prev_date'])
+            if w is not None and w_lo <= w <= w_hi:
+                sub.append(r)
+        roi_summary(sub, label)
+
+    # ============================================================
+    # 新シグナル候補2: 前走頭数 → 今回多頭数
+    # ============================================================
+    print("\n" + "="*60)
+    print("【新候補2】前走頭数変化 × 穴馬帯(7-11人気)")
+    print("="*60)
+
+    rows_hc = conn.execute("""
+        SELECT e.popularity, res.finish_position,
+               hh.headcount AS prev_hc,
+               (SELECT COUNT(*) FROM entries e2 WHERE e2.race_id = e.race_id) AS cur_hc,
+               pay_t.payout AS tansho, pay_f.payout AS fukusho
+        FROM entries e
+        JOIN races r ON r.race_id = e.race_id
+        JOIN results res ON res.race_id = e.race_id AND res.horse_id = e.horse_id
+        LEFT JOIN horse_histories hh ON hh.horse_id = e.horse_id
+          AND hh.race_date = (
+            SELECT MAX(h2.race_date) FROM horse_histories h2
+            WHERE h2.horse_id = e.horse_id AND h2.race_date < r.date
+          )
+        LEFT JOIN payouts pay_t ON pay_t.race_id = e.race_id AND pay_t.bet_type = '単勝'
+          AND pay_t.combination = CAST(e.horse_number AS TEXT)
+        LEFT JOIN payouts pay_f ON pay_f.race_id = e.race_id AND pay_f.bet_type = '複勝'
+          AND pay_f.combination = CAST(e.horse_number AS TEXT)
+        WHERE (r.race_name LIKE '%(G1)%' OR r.race_name LIKE '%(G2)%' OR r.race_name LIKE '%(G3)%'
+            OR r.race_name LIKE '%（G1）%' OR r.race_name LIKE '%（G2）%' OR r.race_name LIKE '%（G3）%')
+          AND TRIM(r.course_type) = '芝'
+          AND res.finish_position IS NOT NULL
+          AND e.popularity BETWEEN 7 AND 11
+          AND hh.headcount IS NOT NULL
+    """).fetchall()
+
+    for label, fn in [
+        ("前走少頭数(8頭以下)→今回", lambda r: r['prev_hc'] and r['prev_hc'] <= 8),
+        ("前走少頭数→今回多頭数(+4頭以上)", lambda r: r['prev_hc'] and r['prev_hc'] <= 8 and r['cur_hc'] and r['cur_hc'] >= r['prev_hc'] + 4),
+        ("前走多頭数(14頭以上)", lambda r: r['prev_hc'] and r['prev_hc'] >= 14),
+        ("頭数増加(+4頭以上)", lambda r: r['prev_hc'] and r['cur_hc'] and r['cur_hc'] >= r['prev_hc'] + 4),
+        ("頭数減少(-4頭以下)", lambda r: r['prev_hc'] and r['cur_hc'] and r['cur_hc'] <= r['prev_hc'] - 4),
+    ]:
+        sub = [r for r in rows_hc if fn(r)]
+        roi_summary(sub, label)
+
+    # ============================================================
+    # 新シグナル候補3: ダート→芝転換 × 穴馬帯
+    # ============================================================
+    print("\n" + "="*60)
+    print("【新候補3】コース転換(ダート→芝) × 人気帯")
+    print("="*60)
+
+    rows_cs = conn.execute("""
+        SELECT e.popularity, res.finish_position,
+               hh.course_type AS prev_course,
+               hh.finish_position AS prev_pos,
+               hh.popularity AS prev_pop,
+               pay_t.payout AS tansho, pay_f.payout AS fukusho
+        FROM entries e
+        JOIN races r ON r.race_id = e.race_id
+        JOIN results res ON res.race_id = e.race_id AND res.horse_id = e.horse_id
+        LEFT JOIN horse_histories hh ON hh.horse_id = e.horse_id
+          AND hh.race_date = (
+            SELECT MAX(h2.race_date) FROM horse_histories h2
+            WHERE h2.horse_id = e.horse_id AND h2.race_date < r.date
+          )
+        LEFT JOIN payouts pay_t ON pay_t.race_id = e.race_id AND pay_t.bet_type = '単勝'
+          AND pay_t.combination = CAST(e.horse_number AS TEXT)
+        LEFT JOIN payouts pay_f ON pay_f.race_id = e.race_id AND pay_f.bet_type = '複勝'
+          AND pay_f.combination = CAST(e.horse_number AS TEXT)
+        WHERE (r.race_name LIKE '%(G1)%' OR r.race_name LIKE '%(G2)%' OR r.race_name LIKE '%(G3)%'
+            OR r.race_name LIKE '%（G1）%' OR r.race_name LIKE '%（G2）%' OR r.race_name LIKE '%（G3）%')
+          AND TRIM(r.course_type) = '芝'
+          AND res.finish_position IS NOT NULL
+    """).fetchall()
+
+    for label, fn in [
+        ("ダート→芝転換(全人気)", lambda r: r['prev_course'] and 'ダート' in r['prev_course']),
+        ("ダート→芝転換×穴馬7-11人気", lambda r: r['prev_course'] and 'ダート' in r['prev_course'] and r['popularity'] and 7 <= r['popularity'] <= 11),
+        ("ダート→芝転換×前走1-3着", lambda r: r['prev_course'] and 'ダート' in r['prev_course'] and r['prev_pos'] and r['prev_pos'] <= 3),
+        ("芝→芝(参考・同コース継続)", lambda r: r['prev_course'] and '芝' in r['prev_course'] and r['popularity'] and 7 <= r['popularity'] <= 11),
+    ]:
+        sub = [r for r in rows_cs if fn(r)]
+        roi_summary(sub, label)
+
+    # ============================================================
+    # 新シグナル候補4: 斤量変化 × 穴馬帯
+    # ============================================================
+    print("\n" + "="*60)
+    print("【新候補4】斤量変化 × 穴馬帯(7-11人気)")
+    print("="*60)
+
+    rows_wc = conn.execute("""
+        SELECT e.popularity, e.weight_carried AS cur_wc, res.finish_position,
+               hh.weight_carried AS prev_wc,
+               pay_t.payout AS tansho, pay_f.payout AS fukusho
+        FROM entries e
+        JOIN races r ON r.race_id = e.race_id
+        JOIN results res ON res.race_id = e.race_id AND res.horse_id = e.horse_id
+        LEFT JOIN horse_histories hh ON hh.horse_id = e.horse_id
+          AND hh.race_date = (
+            SELECT MAX(h2.race_date) FROM horse_histories h2
+            WHERE h2.horse_id = e.horse_id AND h2.race_date < r.date
+          )
+        LEFT JOIN payouts pay_t ON pay_t.race_id = e.race_id AND pay_t.bet_type = '単勝'
+          AND pay_t.combination = CAST(e.horse_number AS TEXT)
+        LEFT JOIN payouts pay_f ON pay_f.race_id = e.race_id AND pay_f.bet_type = '複勝'
+          AND pay_f.combination = CAST(e.horse_number AS TEXT)
+        WHERE (r.race_name LIKE '%(G1)%' OR r.race_name LIKE '%(G2)%' OR r.race_name LIKE '%(G3)%'
+            OR r.race_name LIKE '%（G1）%' OR r.race_name LIKE '%（G2）%' OR r.race_name LIKE '%（G3）%')
+          AND TRIM(r.course_type) = '芝'
+          AND res.finish_position IS NOT NULL
+          AND e.popularity BETWEEN 7 AND 11
+          AND e.weight_carried IS NOT NULL
+          AND hh.weight_carried IS NOT NULL
+    """).fetchall()
+
+    def wc_diff(r):
+        try:
+            return float(r['cur_wc']) - float(r['prev_wc'])
+        except:
+            return None
+
+    for label, lo, hi in [
+        ("斤量増加(+1kg以上)", 1.0, 99),
+        ("斤量増加(+2kg以上)", 2.0, 99),
+        ("斤量変化なし(±0.5kg以内)", -0.5, 0.5),
+        ("斤量減少(-1kg以下)", -99, -1.0),
+        ("斤量減少(-2kg以下)", -99, -2.0),
+    ]:
+        sub = [r for r in rows_wc if wc_diff(r) is not None and lo <= wc_diff(r) <= hi]
+        roi_summary(sub, label)
+
     conn.close()
     print("\n検証完了。このテキストをクロードに貼り付けてください。")
 
