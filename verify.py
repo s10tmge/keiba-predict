@@ -22,8 +22,8 @@ def roi_summary(rows, label):
         return
     t_hits = [r['tansho'] for r in rows if r['finish_position'] == 1 and r['tansho']]
     f_hits = [r['fukusho'] for r in rows if r['finish_position'] and r['finish_position'] <= 3 and r['fukusho']]
-    t_roi = sum(t_hits) / n / 100
-    f_roi = sum(f_hits) / n / 100
+    t_roi = sum(t_hits) / n
+    f_roi = sum(f_hits) / n
     t_rate = len(t_hits) / n * 100
     f_rate = len(f_hits) / n * 100
     print(f"  {label}: n={n}  単勝ROI={t_roi:.0f}円({t_rate:.1f}%)  複勝ROI={f_roi:.0f}円({f_rate:.1f}%)")
