@@ -473,6 +473,87 @@ def main():
         sub = [r for r in rows_no_hc if wc_diff(r) is not None and lo <= wc_diff(r) <= hi]
         roi_summary(sub, label)
 
+    # ============================================================
+    # レビュー問題1: S3とS5の重複時のROI比較
+    # 「前走4-6人気かつ前走1着」= S3もS5も満たす馬
+    # → どちらの基準で評価すべきか
+    # ============================================================
+    print("\n" + "="*60)
+    print("【レビュー問題1】S3 vs S5 重複馬のROI比較（7-9人気）")
+    print("="*60)
+
+    # S5単独（前走1着×7-9人気 かつ S3非該当: 前走人気が1-3人気 or 7人気以上）
+    s5_only = [r for r in rows
+               if r['popularity'] and 7 <= r['popularity'] <= 9
+               and r['prev_pos'] and r['prev_pos'] == 1
+               and not (r['prev_pop'] and 4 <= r['prev_pop'] <= 6)]
+    roi_summary(s5_only, "S5のみ該当（前走1着×前走人気1-3or7以上）")
+
+    # S3単独（前走4-6人気×前走1-3着 かつ 前走1着以外）
+    s3_only = [r for r in rows
+               if r['popularity'] and 7 <= r['popularity'] <= 9
+               and r['prev_pop'] and 4 <= r['prev_pop'] <= 6
+               and r['prev_pos'] and 2 <= r['prev_pos'] <= 3]
+    roi_summary(s3_only, "S3のみ該当（前走4-6人気×前走2-3着）")
+
+    # S3かつS5重複（前走4-6人気×前走1着×7-9人気）
+    s3_and_s5 = [r for r in rows
+                 if r['popularity'] and 7 <= r['popularity'] <= 9
+                 and r['prev_pop'] and 4 <= r['prev_pop'] <= 6
+                 and r['prev_pos'] and r['prev_pos'] == 1]
+    roi_summary(s3_and_s5, "S3+S5重複（前走4-6人気×前走1着）← 問題の核心")
+
+    # S3全体（前走4-6人気×前走1-3着、重複含む）
+    s3_all = [r for r in rows
+              if r['popularity'] and 7 <= r['popularity'] <= 9
+              and r['prev_pop'] and 4 <= r['prev_pop'] <= 6
+              and r['prev_pos'] and 1 <= r['prev_pos'] <= 3]
+    roi_summary(s3_all, "S3全体（前走1着含む・参考）")
+
+    # S5全体（前走1着×7-9人気、重複含む）
+    s5_all = [r for r in rows
+              if r['popularity'] and 7 <= r['popularity'] <= 9
+              and r['prev_pos'] and r['prev_pos'] == 1]
+    roi_summary(s5_all, "S5全体（前走4-6人気含む・参考）")
+
+    # ============================================================
+    # レビュー問題2: S1+S8重複馬のROI
+    # 前走1-3人気かつ前走後方かつ前走7着以下 → 今回9-11人気
+    # ============================================================
+    print("\n" + "="*60)
+    print("【レビュー問題2】S1+S8重複馬のROI（9-11人気）")
+    print("="*60)
+
+    # S1のみ（後方大敗ではない）
+    s1_only = [r for r in rows
+               if r['popularity'] and 9 <= r['popularity'] <= 11
+               and r['prev_pop'] and 1 <= r['prev_pop'] <= 3
+               and not (r['prev_pos'] and r['prev_pos'] >= 7
+                        and pace_style(r['prev_corner'], r['prev_headcount']) == "後方")]
+    roi_summary(s1_only, "S1のみ（後方大敗除く）")
+
+    # S1+S8重複（前走1-3人気×後方大敗×7着以下×今回9-11人気）
+    s1_and_s8 = [r for r in rows
+                 if r['popularity'] and 9 <= r['popularity'] <= 11
+                 and r['prev_pop'] and 1 <= r['prev_pop'] <= 3
+                 and r['prev_pos'] and r['prev_pos'] >= 7
+                 and pace_style(r['prev_corner'], r['prev_headcount']) == "後方"]
+    roi_summary(s1_and_s8, "S1+S8重複（前走1-3人気×後方7着以下）← 問題の核心")
+
+    # S8のみ（前走1-3人気ではない）
+    s8_only = [r for r in rows
+               if r['popularity'] and 7 <= r['popularity'] <= 11
+               and r['prev_pos'] and r['prev_pos'] >= 7
+               and pace_style(r['prev_corner'], r['prev_headcount']) == "後方"
+               and not (r['prev_pop'] and 1 <= r['prev_pop'] <= 3)]
+    roi_summary(s8_only, "S8のみ（前走1-3人気を除く）")
+
+    # S1全体（参考）
+    s1_all = [r for r in rows
+              if r['popularity'] and 9 <= r['popularity'] <= 11
+              and r['prev_pop'] and 1 <= r['prev_pop'] <= 3]
+    roi_summary(s1_all, "S1全体（参考）")
+
     conn.close()
     print("\n検証完了。このテキストをクロードに貼り付けてください。")
 
