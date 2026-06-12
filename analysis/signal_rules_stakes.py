@@ -136,11 +136,27 @@ def score_stakes(entry: dict, prev: Optional[dict],
         })
 
     # -------------------------------------------------------
+    # S5: 今回7-9人気 × 前走1着（単勝ROI 152円, n=111）
+    # 前走勝ち馬が今回7-9人気に落ちているパターン
+    # 7-11 拡張はROI低下（152→127円）→ 7-9 維持
+    # ※ S5該当馬はS3・S4を加算しない（二重計上防止）
+    # -------------------------------------------------------
+    s5_fired = False
+    if 7 <= pop <= 9 and prev_pos == 1:
+        s5_fired = True
+        signals.append({
+            'name': 'S5_前走勝ち馬',
+            'score': 2.5,
+            'desc': f"前走1着→今回{pop}人気"
+        })
+
+    # -------------------------------------------------------
     # S3: 今回7-9人気 × 前走4-6人気 × 前走1-3着（単勝ROI 289円, n=36）
     # 前走好走したのに中穴に留まっている＝市場の過小評価が強い
     # 7-11 拡張は ROI 大幅低下（289→158円）→ 7-9 維持
+    # ※ S5(前走1着)と重複するケースはS5のみ計上
     # -------------------------------------------------------
-    if 7 <= pop <= 9 and 4 <= prev_pop <= 6 and prev_pos and 1 <= prev_pos <= 3:
+    if not s5_fired and 7 <= pop <= 9 and 4 <= prev_pop <= 6 and prev_pos and 1 <= prev_pos <= 3:
         signals.append({
             'name': 'S3_前走中人気好走',
             'score': 4.0,
@@ -151,8 +167,9 @@ def score_stakes(entry: dict, prev: Optional[dict],
     # S4: 今回7-9人気 × 前走で着順改善（単勝ROI 160円, n=164）
     # 上昇トレンドにあるのに人気がついていない
     # 7-11 拡張は ROI 低下（160→127円）→ 7-9 維持
+    # ※ S5(前走1着)と重複するケースはS5のみ計上
     # -------------------------------------------------------
-    if 7 <= pop <= 9 and prev_pos and prev2_pos:
+    if not s5_fired and 7 <= pop <= 9 and prev_pos and prev2_pos:
         try:
             if float(prev_pos) < float(prev2_pos):
                 signals.append({
@@ -162,18 +179,6 @@ def score_stakes(entry: dict, prev: Optional[dict],
                 })
         except (TypeError, ValueError):
             pass
-
-    # -------------------------------------------------------
-    # S5: 今回7-9人気 × 前走1着（単勝ROI 152円, n=111）
-    # 前走勝ち馬が今回7-9人気に落ちているパターン
-    # 7-11 拡張はROI低下（152→127円）→ 7-9 維持
-    # -------------------------------------------------------
-    if 7 <= pop <= 9 and prev_pos == 1:
-        signals.append({
-            'name': 'S5_前走勝ち馬',
-            'score': 2.5,
-            'desc': f"前走1着→今回{pop}人気"
-        })
 
     # -------------------------------------------------------
     # S6: 今回7-11人気 × 距離延長(100m超) × 前走1-3着（単勝ROI 153円, n=96）
@@ -263,10 +268,12 @@ def score_stakes(entry: dict, prev: Optional[dict],
     # ただし以下のプラスシグナル該当ケースは除外:
     #   S1（prev_pop=1-3）: M1とのnetでも単勝ROI高い
     #   S2（prev_pop=4-6 × prev_pos>=7 × pop=9-13）: S2自体が前走大敗条件
+    #   S8（pace=後方 × pop=7-11）: 後方大敗がS8のシグナル本体
     if pop >= 10 and prev_pos and prev_pos >= 7:
         is_s1_case = (1 <= prev_pop <= 3)
         is_s2_case = (4 <= prev_pop <= 6) and (9 <= pop <= 13)
-        if not is_s1_case and not is_s2_case:
+        is_s8_case = (pace == "後方") and (7 <= pop <= 11)
+        if not is_s1_case and not is_s2_case and not is_s8_case:
             signals.append({
                 'name': 'M1_大穴前走大敗',
                 'score': -2.0,
@@ -314,8 +321,10 @@ def stakes_verdict(score: float, pop: int) -> str:
             return "★  三連複の相手候補"
         elif score >= 1.0:
             return "△  抑え"
-        elif score < 0:
+        elif score <= -2.0:
             return "✕  消し推奨"
+        elif score < 0:
+            return "⚠  注意（過大評価の可能性）"
         else:
             return "-  スルー"
 
