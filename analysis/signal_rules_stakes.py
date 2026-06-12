@@ -187,15 +187,24 @@ def score_stakes(entry: dict, prev: Optional[dict],
         })
 
     # -------------------------------------------------------
-    # S7: 逃げ/先行 × 距離変化±100m以内（単勝ROI 199円, n=109）
+    # S7: 逃げ/先行 × 距離変化±100m以内 × 4枠以上（単勝ROI 199円→中外枠302円/213円）
     # 逃げ先行馬が距離変化の少ないレースで同じ戦法を取れる
+    # ※ 内枠(1-3枠)は他の先行馬に被せられやすくROI30円→除外
     # -------------------------------------------------------
+    frame = entry.get('frame_number')
     if pace == "逃先行" and abs(dist_diff) <= 100 and 7 <= pop <= 11:
-        signals.append({
-            'name': 'S7_逃先行距離同等',
-            'score': 2.0,
-            'desc': f"前走逃先行×距離変化{dist_diff:+d}m×{pop}人気"
-        })
+        if frame and frame >= 4:
+            signals.append({
+                'name': 'S7_逃先行距離同等',
+                'score': 2.0,
+                'desc': f"前走逃先行×距離変化{dist_diff:+d}m×{pop}人気×{frame}枠"
+            })
+        elif frame and frame <= 3:
+            signals.append({
+                'name': 'M4_逃先行内枠',
+                'score': -1.0,
+                'desc': f"前走逃先行×内枠{frame}枠（被せられリスク）"
+            })
 
     # -------------------------------------------------------
     # S8: 後方脚質 × 前走7着以下（単勝ROI 166円, n=60）
@@ -307,6 +316,10 @@ def evaluate_axis_horse(entry: dict, prev: Optional[dict]) -> tuple[str, float]:
         score += 2.0
         notes.append(f"前走{prev_pop}人気{prev_pos}着（安定）")
 
+    # 前走4-6着 → 標準（ニュートラル）
+    if prev_pos and 4 <= prev_pos <= 6:
+        notes.append(f"前走{prev_pos}着（標準）")
+
     # 前走大敗 → 信頼度下がる
     if prev_pos and prev_pos >= 7:
         score -= 1.5
@@ -315,7 +328,7 @@ def evaluate_axis_horse(entry: dict, prev: Optional[dict]) -> tuple[str, float]:
     if score >= 1.5:
         verdict = f"◎ 信頼できる軸 （{'・'.join(notes)}）"
     elif score >= 0:
-        verdict = f"○ 標準的な軸 （{'・'.join(notes)}）"
+        verdict = f"○ 標準的な軸 （{'・'.join(notes) if notes else '前走4-6着圏内'}）"
     else:
         verdict = f"▲ 軸として不安 （{'・'.join(notes)}）"
 
