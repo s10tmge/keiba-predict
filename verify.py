@@ -400,7 +400,7 @@ def main():
         roi_summary(sub, label)
 
     # ============================================================
-    # 新シグナル候補4: 斤量変化 × 穴馬帯
+    # 新シグナル候補4: 斤量変化 × 穴馬帯（ハンデ戦/別定戦で分離）
     # ============================================================
     print("\n" + "="*60)
     print("【新候補4】斤量変化 × 穴馬帯(7-11人気)")
@@ -408,6 +408,7 @@ def main():
 
     rows_wc = conn.execute("""
         SELECT e.popularity, e.weight_carried AS cur_wc, res.finish_position,
+               r.race_name,
                hh.weight_carried AS prev_wc,
                pay_t.payout AS tansho, pay_f.payout AS fukusho
         FROM entries e
@@ -437,14 +438,39 @@ def main():
         except:
             return None
 
+    def is_handicap(r):
+        name = r['race_name'] or ''
+        return 'ハンデ' in name or 'ハンディ' in name
+
+    print("  ── 全レース ──")
     for label, lo, hi in [
         ("斤量増加(+1kg以上)", 1.0, 99),
         ("斤量増加(+2kg以上)", 2.0, 99),
         ("斤量変化なし(±0.5kg以内)", -0.5, 0.5),
         ("斤量減少(-1kg以下)", -99, -1.0),
-        ("斤量減少(-2kg以下)", -99, -2.0),
     ]:
         sub = [r for r in rows_wc if wc_diff(r) is not None and lo <= wc_diff(r) <= hi]
+        roi_summary(sub, label)
+
+    print("\n  ── ハンデ戦のみ ──")
+    rows_hc_only = [r for r in rows_wc if is_handicap(r)]
+    rows_no_hc   = [r for r in rows_wc if not is_handicap(r)]
+    print(f"  ハンデ戦n={len(rows_hc_only)}  別定戦n={len(rows_no_hc)}")
+    for label, lo, hi in [
+        ("ハンデ戦×斤量増加(+1kg以上)", 1.0, 99),
+        ("ハンデ戦×斤量減少(-1kg以下)", -99, -1.0),
+    ]:
+        sub = [r for r in rows_hc_only if wc_diff(r) is not None and lo <= wc_diff(r) <= hi]
+        roi_summary(sub, label)
+
+    print("\n  ── 別定戦のみ（ハンデ戦除く）──")
+    for label, lo, hi in [
+        ("別定戦×斤量増加(+1kg以上)", 1.0, 99),
+        ("別定戦×斤量増加(+2kg以上)", 2.0, 99),
+        ("別定戦×斤量変化なし(±0.5kg)", -0.5, 0.5),
+        ("別定戦×斤量減少(-1kg以下)", -99, -1.0),
+    ]:
+        sub = [r for r in rows_no_hc if wc_diff(r) is not None and lo <= wc_diff(r) <= hi]
         roi_summary(sub, label)
 
     conn.close()
