@@ -218,6 +218,24 @@ def score_stakes(entry: dict, prev: Optional[dict],
         })
 
     # -------------------------------------------------------
+    # S9: 斤量増加(+1kg以上) × 穴馬7-11人気（単勝ROI 169円, n=142）
+    # 別定重賞での斤量増加 = 格上げ挑戦。市場が過小評価しやすい。
+    # -------------------------------------------------------
+    cur_wc = entry.get('weight_carried')
+    prev_wc = prev.get('weight_carried') or prev.get('prev_weight_carried')
+    try:
+        wc_diff = float(cur_wc) - float(prev_wc)
+    except (TypeError, ValueError):
+        wc_diff = None
+
+    if wc_diff is not None and wc_diff >= 1.0 and 7 <= pop <= 11:
+        signals.append({
+            'name': 'S9_斤量増加格上げ',
+            'score': 1.5,
+            'desc': f"斤量+{wc_diff:.1f}kg（格上げ）×{pop}人気"
+        })
+
+    # -------------------------------------------------------
     # D_騎手: 騎手勝率ボーナス（補助シグナル）
     # 穴馬帯×騎手勝率15%以上: 単独ROIは弱いが他シグナルの補強に
     # -------------------------------------------------------
@@ -254,6 +272,15 @@ def score_stakes(entry: dict, prev: Optional[dict],
                 'score': -2.0,
                 'desc': f"今回{pop}人気×前走{prev_pos}着"
             })
+
+    # M5: 斤量減少(-1kg以下) × 穴馬7-11人気（単勝ROI 44円 = 大幅マイナス）
+    # 格下げ出走 = 陣営が能力不足と判断している可能性
+    if wc_diff is not None and wc_diff <= -1.0 and 7 <= pop <= 11:
+        signals.append({
+            'name': 'M5_斤量減少格下げ',
+            'score': -1.5,
+            'desc': f"斤量{wc_diff:.1f}kg（格下げ）×{pop}人気"
+        })
 
     # M3: 中団脚質 × 7-9人気（単勝ROI 36円 = 大幅マイナス期待値）
     # 中団は展開に恵まれないと脚を使えないため、穴馬としての爆発力に欠ける
