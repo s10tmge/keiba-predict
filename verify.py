@@ -605,7 +605,7 @@ def main():
     # オッズ閾値検証: 人気帯条件をオッズ帯に置き換える可能性
     # ============================================================
     print("\n" + "="*60)
-    print("【オッズ検証①】実力条件のみ（今回人気問わず）× オッズ帯別ROI")
+    print("[odds-1] jitsuryoku jouken nomi x odds tai betsu ROI")
     print("="*60)
 
     rows_odds = conn.execute("""
@@ -676,7 +676,7 @@ def main():
     # オッズ検証②: 現行人気帯のオッズ分布確認
     # ============================================================
     print("\n" + "="*60)
-    print("【オッズ検証②】現行人気帯に対応するオッズ分布")
+    print("[odds-2] genkou ninki tai ni taishou suru odds bunpu")
     print("="*60)
 
     import statistics
@@ -707,7 +707,7 @@ def main():
     # オッズ検証③: 「実力条件のみ」vs「現行人気帯あり」vs「オッズ閾値あり」比較
     # ============================================================
     print("\n" + "="*60)
-    print("【オッズ検証③】3パターン比較（S1相当・S3相当・S5相当）")
+    print("[odds-3] 3 pattern hikaku (S1/S3/S5)")
     print("="*60)
 
     for sig_label, sig_fn, cur_pop_lo, cur_pop_hi in [
