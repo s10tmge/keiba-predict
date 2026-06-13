@@ -554,6 +554,53 @@ def main():
               and r['prev_pop'] and 1 <= r['prev_pop'] <= 3]
     roi_summary(s1_all, "S1全体（参考）")
 
+    # ============================================================
+    # 新検証: 14人気以上の三連複ヒモ候補
+    # S1型（前走1-3人気→今回14人気以上）の複勝ROIを確認
+    # ============================================================
+    print("\n" + "="*60)
+    print("【新検証】14人気以上の三連複ヒモ候補（複勝ROI重視）")
+    print("="*60)
+
+    # S1型の人気帯拡張（14人気以上）
+    for pop_lo, pop_hi, label in [
+        (9,  11, "S1現行 (9-11人気)×前走1-3人気"),
+        (12, 13, "S2空白帯 (12-13人気)×前走1-3人気"),
+        (14, 16, "拡張候補 (14-16人気)×前走1-3人気"),
+        (17, 99, "超大穴 (17人気以上)×前走1-3人気"),
+        (14, 99, "14人気以上×前走1-3人気（合計）"),
+    ]:
+        sub = [r for r in rows
+               if r['popularity'] and pop_lo <= r['popularity'] <= pop_hi
+               and r['prev_pop'] and 1 <= r['prev_pop'] <= 3]
+        roi_summary(sub, label)
+
+    print()
+    # S2型の人気帯拡張（14人気以上）
+    for pop_lo, pop_hi, label in [
+        (9,  13, "S2現行 (9-13人気)×前走4-6人気×前走7着以下"),
+        (14, 99, "S2拡張 (14人気以上)×前走4-6人気×前走7着以下"),
+    ]:
+        sub = [r for r in rows
+               if r['popularity'] and pop_lo <= r['popularity'] <= pop_hi
+               and r['prev_pop'] and 4 <= r['prev_pop'] <= 6
+               and r['prev_pos'] and r['prev_pos'] >= 7]
+        roi_summary(sub, label)
+
+    print()
+    # 14人気以上の全体ROIベースライン
+    for pop_lo, pop_hi, label in [
+        (14, 99, "14人気以上 全体ベースライン"),
+        (14, 99, "14人気以上 前走1-6人気（合算）"),
+    ]:
+        if "前走" in label:
+            sub = [r for r in rows
+                   if r['popularity'] and r['popularity'] >= 14
+                   and r['prev_pop'] and 1 <= r['prev_pop'] <= 6]
+        else:
+            sub = [r for r in rows if r['popularity'] and r['popularity'] >= 14]
+        roi_summary(sub, label)
+
     conn.close()
     print("\n検証完了。このテキストをクロードに貼り付けてください。")
 
