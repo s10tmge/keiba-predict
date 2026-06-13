@@ -789,6 +789,45 @@ def main():
     print(f"\n  グループB（前走非ハンデ → 今回）:")
     roi_summary(s9_fixed_to_fixed, "  B: 前走非ハンデ")
 
+    # ============================================================
+    # 4〜6人気帯 ROI検証（空白地帯の把握）
+    # ============================================================
+    print("\n" + "="*60)
+    print("[4-6人気帯検証] 前走条件別ROI（市場評価が高い穴馬ゾーン）")
+    print("="*60)
+
+    mid_rows = [r for r in rows if r['popularity'] and 4 <= r['popularity'] <= 6]
+    roi_summary(mid_rows, "4-6人気 全体")
+
+    print()
+    # 前走着順別
+    for label, fn in [
+        ("前走1着", lambda r: r['prev_pos'] == 1),
+        ("前走2-3着", lambda r: r['prev_pos'] and 2 <= r['prev_pos'] <= 3),
+        ("前走4-6着", lambda r: r['prev_pos'] and 4 <= r['prev_pos'] <= 6),
+        ("前走7着以下", lambda r: r['prev_pos'] and r['prev_pos'] >= 7),
+    ]:
+        roi_summary([r for r in mid_rows if fn(r)], label)
+
+    print()
+    # 前走人気×前走着順（S3/S5相当パターン）
+    roi_summary([r for r in mid_rows if r['prev_pop'] and 1 <= r['prev_pop'] <= 3 and r['prev_pos'] == 1],
+                "前走1-3人気×前走1着（S1相当）")
+    roi_summary([r for r in mid_rows if r['prev_pop'] and 4 <= r['prev_pop'] <= 6 and r['prev_pos'] == 1],
+                "前走4-6人気×前走1着（S3+S5相当）")
+    roi_summary([r for r in mid_rows if r['prev_pop'] and 1 <= r['prev_pop'] <= 3],
+                "前走1-3人気（S1相当・着順問わず）")
+
+    print()
+    # オッズ帯別（market_value確認）
+    print("  オッズ帯別:")
+    for label, lo, hi in [
+        ("3-5倍", 3.0, 5.0),
+        ("5-8倍", 5.0, 8.0),
+        ("8-15倍", 8.0, 15.0),
+    ]:
+        roi_summary([r for r in mid_rows if r['cur_odds'] and lo <= r['cur_odds'] < hi], f"  {label}")
+
     conn.close()
     print("\n検証完了。このテキストをクロードに貼り付けてください。")
 
