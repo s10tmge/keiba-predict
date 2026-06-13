@@ -601,6 +601,137 @@ def main():
             sub = [r for r in rows if r['popularity'] and r['popularity'] >= 14]
         roi_summary(sub, label)
 
+    # ============================================================
+    # オッズ閾値検証: 人気帯条件をオッズ帯に置き換える可能性
+    # ============================================================
+    print("\n" + "="*60)
+    print("【オッズ検証①】実力条件のみ（今回人気問わず）× オッズ帯別ROI")
+    print("="*60)
+
+    rows_odds = conn.execute("""
+        SELECT
+            e.odds AS cur_odds,
+            e.popularity,
+            res.finish_position,
+            hh.popularity       AS prev_pop,
+            hh.finish_position  AS prev_pos,
+            pay_t.payout  AS tansho,
+            pay_f.payout  AS fukusho
+        FROM entries e
+        JOIN races r   ON r.race_id = e.race_id
+        JOIN results res ON res.race_id = e.race_id AND res.horse_id = e.horse_id
+        LEFT JOIN horse_histories hh ON hh.horse_id = e.horse_id
+          AND hh.race_date = (
+            SELECT MAX(h2.race_date) FROM horse_histories h2
+            WHERE h2.horse_id = e.horse_id AND h2.race_date < r.date
+          )
+        LEFT JOIN payouts pay_t ON pay_t.race_id = e.race_id AND pay_t.bet_type = '単勝'
+          AND pay_t.combination = CAST(e.horse_number AS TEXT)
+        LEFT JOIN payouts pay_f ON pay_f.race_id = e.race_id AND pay_f.bet_type = '複勝'
+          AND pay_f.combination = CAST(e.horse_number AS TEXT)
+        WHERE (r.race_name LIKE '%(G1)%' OR r.race_name LIKE '%(G2)%' OR r.race_name LIKE '%(G3)%'
+            OR r.race_name LIKE '%（G1）%' OR r.race_name LIKE '%（G2）%' OR r.race_name LIKE '%（G3）%')
+          AND TRIM(r.course_type) = '芝'
+          AND res.finish_position IS NOT NULL
+          AND e.odds IS NOT NULL
+    """).fetchall()
+
+    odds_bands = [
+        ("3〜5倍",   3.0,  5.0),
+        ("5〜10倍",  5.0, 10.0),
+        ("10〜20倍",10.0, 20.0),
+        ("20〜50倍",20.0, 50.0),
+        ("50倍以上", 50.0, 9999),
+    ]
+
+    # 実力条件の定義（今回人気問わず）
+    def match_s1_equiv(r):   # 前走1-3人気
+        return r['prev_pop'] and 1 <= r['prev_pop'] <= 3
+
+    def match_s2_equiv(r):   # 前走4-6人気 × 前走7着以下
+        return r['prev_pop'] and 4 <= r['prev_pop'] <= 6 and r['prev_pos'] and r['prev_pos'] >= 7
+
+    def match_s3_equiv(r):   # 前走4-6人気 × 前走1着
+        return r['prev_pop'] and 4 <= r['prev_pop'] <= 6 and r['prev_pos'] and r['prev_pos'] == 1
+
+    def match_s5_equiv(r):   # 前走1着
+        return r['prev_pos'] and r['prev_pos'] == 1
+
+    signals_def = [
+        ("S1相当(前走1-3人気)", match_s1_equiv),
+        ("S2相当(前走4-6人気×前走7着以下)", match_s2_equiv),
+        ("S3相当(前走4-6人気×前走1着)", match_s3_equiv),
+        ("S5相当(前走1着)", match_s5_equiv),
+    ]
+
+    for sig_label, sig_fn in signals_def:
+        print(f"\n  ── {sig_label} ──")
+        sig_rows = [r for r in rows_odds if sig_fn(r)]
+        roi_summary(sig_rows, "  全オッズ（今回人気問わず）")
+        for band_label, lo, hi in odds_bands:
+            sub = [r for r in sig_rows if r['cur_odds'] and lo <= r['cur_odds'] < hi]
+            roi_summary(sub, f"  {band_label}")
+
+    # ============================================================
+    # オッズ検証②: 現行人気帯のオッズ分布確認
+    # ============================================================
+    print("\n" + "="*60)
+    print("【オッズ検証②】現行人気帯に対応するオッズ分布")
+    print("="*60)
+
+    import statistics
+    for pop_lo, pop_hi, label in [
+        (7, 9,  "7-9人気（S3/S4/S5対象帯）"),
+        (9, 11, "9-11人気（S1対象帯）"),
+        (9, 13, "9-13人気（S2対象帯）"),
+        (7, 11, "7-11人気（S6/S7/S8/S9対象帯）"),
+    ]:
+        sub_odds = [r['cur_odds'] for r in rows_odds
+                    if r['popularity'] and pop_lo <= r['popularity'] <= pop_hi
+                    and r['cur_odds']]
+        if not sub_odds:
+            print(f"  {label}: n=0")
+            continue
+        sub_odds.sort()
+        n = len(sub_odds)
+        p10 = sub_odds[int(n*0.10)]
+        p25 = sub_odds[int(n*0.25)]
+        p50 = sub_odds[int(n*0.50)]
+        p75 = sub_odds[int(n*0.75)]
+        p90 = sub_odds[int(n*0.90)]
+        print(f"  {label}: n={n}  "
+              f"10%={p10:.1f}倍  25%={p25:.1f}倍  中央={p50:.1f}倍  "
+              f"75%={p75:.1f}倍  90%={p90:.1f}倍")
+
+    # ============================================================
+    # オッズ検証③: 「実力条件のみ」vs「現行人気帯あり」vs「オッズ閾値あり」比較
+    # ============================================================
+    print("\n" + "="*60)
+    print("【オッズ検証③】3パターン比較（S1相当・S3相当・S5相当）")
+    print("="*60)
+
+    for sig_label, sig_fn, cur_pop_lo, cur_pop_hi in [
+        ("S1", match_s1_equiv, 9, 11),
+        ("S3", match_s3_equiv, 7, 9),
+        ("S5", match_s5_equiv, 7, 9),
+    ]:
+        print(f"\n  ── {sig_label} ──")
+        base = [r for r in rows_odds if sig_fn(r)]
+        # パターンA: 実力条件のみ（人気・オッズ問わず）
+        roi_summary(base, f"A) 実力条件のみ（人気問わず）")
+        # パターンB: 現行（人気帯条件あり）
+        b = [r for r in base if r['popularity'] and cur_pop_lo <= r['popularity'] <= cur_pop_hi]
+        roi_summary(b, f"B) 現行人気帯 ({cur_pop_lo}-{cur_pop_hi}人気)")
+        # パターンC: オッズ閾値 10倍以上
+        c10 = [r for r in base if r['cur_odds'] and r['cur_odds'] >= 10.0]
+        roi_summary(c10, f"C) オッズ10倍以上")
+        # パターンD: オッズ閾値 15倍以上
+        c15 = [r for r in base if r['cur_odds'] and r['cur_odds'] >= 15.0]
+        roi_summary(c15, f"D) オッズ15倍以上")
+        # パターンE: オッズ閾値 20倍以上
+        c20 = [r for r in base if r['cur_odds'] and r['cur_odds'] >= 20.0]
+        roi_summary(c20, f"E) オッズ20倍以上")
+
     conn.close()
     print("\n検証完了。このテキストをクロードに貼り付けてください。")
 
