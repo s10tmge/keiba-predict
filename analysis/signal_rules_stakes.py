@@ -216,9 +216,10 @@ def score_stakes(entry: dict, prev: Optional[dict],
             })
 
     # -------------------------------------------------------
-    # S8: 後方脚質 × 前走7着以下（単勝ROI 166円, n=60）
+    # S8: 後方脚質 × 前走7着以下（単勝ROI 199円, n=50）
     # 後方から上がり脚を使うタイプが前走大敗後に嫌われているパターン
     # ※ 前走1-3人気との重複（S1+S8）はROI 0円（n=4全滅）のため除外
+    #   ROI 199円は前走1-3人気除外後の値（除外前は166円 n=60）
     #   「前走人気馬が後方で大敗」は能力不足の可能性が高い
     # -------------------------------------------------------
     if pace == "後方" and prev_pos and prev_pos >= 7 and 7 <= pop <= 11 and not (1 <= prev_pop <= 3):
@@ -278,7 +279,7 @@ def score_stakes(entry: dict, prev: Optional[dict],
     if pop >= 10 and prev_pos and prev_pos >= 7:
         is_s1_case = (1 <= prev_pop <= 3)
         is_s2_case = (4 <= prev_pop <= 6) and (9 <= pop <= 13)
-        is_s8_case = (pace == "後方") and (7 <= pop <= 11)
+        is_s8_case = (pace == "後方") and (7 <= pop <= 11) and bool(prev_pos and prev_pos >= 7)
         if not is_s1_case and not is_s2_case and not is_s8_case:
             signals.append({
                 'name': 'M1_大穴前走大敗',

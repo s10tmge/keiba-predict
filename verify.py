@@ -732,6 +732,63 @@ def main():
         c20 = [r for r in base if r['cur_odds'] and r['cur_odds'] >= 20.0]
         roi_summary(c20, f"E) オッズ20倍以上")
 
+    # ============================================================
+    # 確認②: S9の定量戦フィルタ（斤量増加の内訳検証）
+    # ============================================================
+    print("\n" + "="*60)
+    print("[S9確認] 斤量増加パターン別ROI（定量移行 vs ハンデ→別定）")
+    print("="*60)
+
+    rows_s9 = conn.execute("""
+        SELECT
+            e.popularity    AS pop,
+            e.weight_carried AS cur_wc,
+            hh.weight_carried AS prev_wc,
+            hh.race_class   AS prev_race_class,
+            r.race_class    AS cur_race_class,
+            res.finish_position,
+            pay_t.payout    AS tansho,
+            pay_f.payout    AS fukusho
+        FROM entries e
+        JOIN races r ON r.race_id = e.race_id
+        JOIN results res ON res.race_id = e.race_id AND res.horse_id = e.horse_id
+        LEFT JOIN horse_histories hh ON hh.horse_id = e.horse_id
+          AND hh.race_date = (
+            SELECT MAX(h2.race_date) FROM horse_histories h2
+            WHERE h2.horse_id = e.horse_id AND h2.race_date < r.date
+          )
+        LEFT JOIN payouts pay_t ON pay_t.race_id=e.race_id AND pay_t.bet_type='単勝'
+            AND pay_t.combination = CAST(e.horse_number AS TEXT)
+        LEFT JOIN payouts pay_f ON pay_f.race_id=e.race_id AND pay_f.bet_type='複勝'
+            AND pay_f.combination = CAST(e.horse_number AS TEXT)
+        WHERE (r.race_name LIKE '%(G1)%' OR r.race_name LIKE '%(G2)%'
+            OR r.race_name LIKE '%(G3)%'
+            OR r.race_name LIKE '%（G1）%'
+            OR r.race_name LIKE '%（G2）%'
+            OR r.race_name LIKE '%（G3）%')
+          AND TRIM(r.course_type) = '芝'
+          AND res.finish_position IS NOT NULL
+          AND e.weight_carried IS NOT NULL
+          AND hh.weight_carried IS NOT NULL
+          AND 7 <= e.popularity AND e.popularity <= 11
+    """).fetchall()
+
+    s9_all = [r for r in rows_s9
+              if r['cur_wc'] and r['prev_wc']
+              and (float(r['cur_wc']) - float(r['prev_wc'])) >= 1.0]
+
+    s9_from_handicap = [r for r in s9_all
+                        if r['prev_race_class'] and 'ハンデ' in str(r['prev_race_class'])]
+    s9_fixed_to_fixed = [r for r in s9_all
+                         if r['prev_race_class'] and 'ハンデ' not in str(r['prev_race_class'])]
+
+    print(f"  S9全体（斤量+1以上 × 7-11人気）:")
+    roi_summary(s9_all, "  S9全体")
+    print(f"\n  グループA（前走ハンデ戦 → 今回）:")
+    roi_summary(s9_from_handicap, "  A: 前走ハンデ")
+    print(f"\n  グループB（前走非ハンデ → 今回）:")
+    roi_summary(s9_fixed_to_fixed, "  B: 前走非ハンデ")
+
     conn.close()
     print("\n検証完了。このテキストをクロードに貼り付けてください。")
 
