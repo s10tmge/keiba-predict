@@ -47,6 +47,7 @@ def pace_style(corner_position, headcount):
 BASE_SQL = """
 SELECT
     e.race_id, e.horse_number, e.popularity, e.frame_number,
+    e.odds AS cur_odds,
     r.distance AS race_dist,
     res.finish_position,
     hh.popularity       AS prev_pop,

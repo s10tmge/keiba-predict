@@ -30,7 +30,7 @@ analysis/signal_rules_stakes.py - 重賞専用スコアリングロジック
 
 マイナスシグナル:
   M1: 10人気+ × 前走7着以下: 単勝35円 → -2.0点
-      ただし S1(prev_pop=1-3)の場合は適用しない
+      ただし S1/S2/S8 が発動している馬には適用しない（発動済みシグナル参照方式）
   M3: 中団(前走4角26-70%) × 7-9人気: 単勝36円 → -1.5点
 
 脚質判定: 前走4角通過順位 ÷ 前走頭数
@@ -263,15 +263,15 @@ def score_stakes(entry: dict, prev: Optional[dict],
     # -------------------------------------------------------
 
     # M1: 10人気以上 × 前走7着以下（単勝ROI 35円）
-    # ただし以下のプラスシグナル該当ケースは除外:
-    #   S1（prev_pop=1-3）: M1とのnetでも単勝ROI高い
-    #   S2（prev_pop=4-6 × prev_pos>=7 × pop=9-13）: S2自体が前走大敗条件
-    #   S8（pace=後方 × pop=7-11）: 後方大敗がS8のシグナル本体
+    # ただしS1・S2・S8が発動している馬には適用しない:
+    #   S1: M1とのnetでも単勝ROI高い
+    #   S2: S2自体が前走大敗条件
+    #   S8: 後方大敗がS8のシグナル本体
+    # ※ 発動済みシグナル名を直接参照する方式（条件の二重管理によるバグを防止）
     if pop >= 10 and prev_pos and prev_pos >= 7:
-        is_s1_case = (1 <= prev_pop <= 3)
-        is_s2_case = (4 <= prev_pop <= 6) and (9 <= pop <= 13)
-        is_s8_case = (pace == "後方") and (7 <= pop <= 11) and bool(prev_pos and prev_pos >= 7)
-        if not is_s1_case and not is_s2_case and not is_s8_case:
+        fired = {s['name'] for s in signals}
+        protected = fired & {'S1_前走上位人気急落', 'S2_前走大敗穴', 'S8_後方前走大敗'}
+        if not protected:
             signals.append({
                 'name': 'M1_大穴前走大敗',
                 'score': -2.0,

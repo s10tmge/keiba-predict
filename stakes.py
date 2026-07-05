@@ -23,6 +23,7 @@ def get_race_entries(conn: sqlite3.Connection, race_id: str) -> list[dict]:
             e.horse_id, e.horse_number, e.frame_number,
             e.jockey_name, e.trainer_name,
             e.popularity, e.odds, e.horse_weight, e.horse_weight_diff,
+            e.weight_carried,
             h.name AS horse_name,
             ra.course_type, ra.distance, ra.track_condition,
             ra.venue, ra.date, ra.race_name, ra.race_class,
@@ -40,7 +41,8 @@ def get_race_entries(conn: sqlite3.Connection, race_id: str) -> list[dict]:
 
         prev_row = conn.execute("""
             SELECT finish_position, popularity, headcount, distance,
-                   course_type, last_3f, race_class, race_date
+                   course_type, last_3f, race_class, race_date,
+                   corner_position, weight_carried
             FROM horse_histories
             WHERE horse_id = ? AND race_date < ?
             ORDER BY race_date DESC LIMIT 1
@@ -105,6 +107,10 @@ def print_stakes_prediction(race_id: str, horses: list[dict]) -> None:
             for s in h['signals']:
                 if s['score'] > 0:
                     print(f"       ✓ {s['name']}: {s['desc']}  (+{s['score']})")
+                elif s['score'] < 0:
+                    print(f"       ✗ {s['name']}: {s['desc']}  ({s['score']})")
+                else:
+                    print(f"       ・ {s['name']}: {s['desc']}  (参考)")
             print(f"       → スコア{h['score']:.1f}  {verd}")
 
     # 消し推奨
